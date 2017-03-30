@@ -9,7 +9,7 @@
  */
 
 
-namespace wechat;
+namespace Wechat;
 
 
 class Autoloader{
