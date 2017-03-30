@@ -25,18 +25,18 @@ $sslCertPath = '111/32.txt';
 $sslKeyPath  = '123';
 //$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
 $wxPay       = new WxPay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
-$wxPayConfig = WxPay::getWxPayConfig();
-var_dump($wxPayConfig::getAppId());
+//$wxPayConfig = WxPay::getWxPayConfig();
+//var_dump($wxPayConfig::getAppId());
+//
+//$wxPayConfig::setAppId(123);
+//
+//var_dump($wxPayConfig::getAppId());
+//
+//var_dump($wxPayConfig::getCurlProxyHost());
+//
+////var_dump($_SERVER);
+//var_dump($wxPayConfig::setCurlProxyHost('116.255.212.73'));
 
-$wxPayConfig::setAppId(123);
-
-var_dump($wxPayConfig::getAppId());
-
-var_dump($wxPayConfig::getCurlProxyHost());
-
-//var_dump($_SERVER);
-var_dump($wxPayConfig::setCurlProxyHost('116.255.212.73'));
-
-var_dump($wxPayConfig::getCurlProxyHost());
+//var_dump($wxPayConfig::getCurlProxyHost());
 
 //$wxPay = new wxpay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
