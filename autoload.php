@@ -9,6 +9,6 @@
  * file that was distributed with this source code.
  */
 
-require __DIR__.'/src/Autoloader.class.php';
+require __DIR__ . '/src/Autoloader.php';
 
 houseme\wxpay\Autoloader::register();

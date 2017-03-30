@@ -16,7 +16,7 @@ use houseme\wxpay\WxPay;
 //use houseme\wxpay\WxPayConfig;
 
 //include "../src/WxPayConfig.class.php";
-include "../src/WxPay.class.php";
+include "../src/WxPay.php";
 $appId       = '1';
 $mchId       = '2';
 $key         = '3';
