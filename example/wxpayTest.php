@@ -11,7 +11,7 @@ namespace houseme\wxpaytest;
  */
 //use houseme\wxpay\WxPayConfig as WxPayConfig;
 
-use houseme\wxpay\wxPay;
+use houseme\wxpay\WxPay;
 
 //use houseme\wxpay\WxPayConfig;
 
@@ -23,10 +23,9 @@ $key         = '3';
 $appSecret   = '4';
 $sslCertPath = '111/32.txt';
 $sslKeyPath  = '123';
-wxPay::register_autoloader();
 //$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
-$wxPay       = new wxPay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
-$wxPayConfig = wxPay::getWxPayConfig();
+$wxPay       = new WxPay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
+$wxPayConfig = WxPay::getWxPayConfig();
 var_dump($wxPayConfig::getAppId());
 
 $wxPayConfig::setAppId(123);
