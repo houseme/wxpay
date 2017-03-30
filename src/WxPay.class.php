@@ -40,22 +40,6 @@ class WxPay{
         }
     }
     
-    
-//    public function autoloader($class) {
-//        if (file_exists(dirname(__FILE__) . '/' . $class . '.class.php')) {
-//            require_once(dirname(__FILE__) . '/' . $class . '.class.php');
-//        }
-//    }
-//
-//    /**
-//     * Register the built-in autoloader
-//     *
-//     * @codeCoverageIgnore
-//     */
-//    public static function register_autoloader() {
-//        spl_autoload_register('autoloader');
-//    }
-    
     /**
      * @return WxPayConfig
      */
