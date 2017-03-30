@@ -1,0 +1,29 @@
+{
+    "name": "houseme/wxpay",
+    "description": "Wechat pay library ",
+    "version": "1.0.0",
+    "type": "library",
+    "keywords": ["wechat", "pay", "wxpay", "houseme"],
+    "homepage": "https://github.com/houseme/wxpay",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "houseme",
+            "email": "houseme@outlook.com",
+            "homepage": "http://houseme.cn",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/houseme/wxpay/issues",
+        "docs": "https://github.com/houseme/wxpay/master/docs/README.md"
+    },
+    "require": {
+        "php": ">=5.4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "houseme\\wxpay\\": "src/"
+        }
+    }
+}
