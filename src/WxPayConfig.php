@@ -9,7 +9,7 @@
  */
 
 
-namespace houseme\wxpay;
+namespace Wechat;
 
 /**
  * 	配置账号信息

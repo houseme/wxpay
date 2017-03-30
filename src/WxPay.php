@@ -8,7 +8,7 @@
  * Chinese:
  */
 
-namespace houseme\wxpay;
+namespace Wechat;
 
 class WxPay{
     /**

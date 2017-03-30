@@ -9,7 +9,7 @@
  */
 
 
-namespace houseme\wxpay;
+namespace Wechat;
 
 
 class WxPayShortUrl extends WxPayDataBase{

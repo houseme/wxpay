@@ -9,7 +9,7 @@
  * Chinese:
  */
 
-namespace houseme\wxpay;
+namespace Wechat;
 /**
  *
  * 关闭订单输入对象

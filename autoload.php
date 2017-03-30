@@ -11,4 +11,4 @@
 
 require __DIR__ . '/src/Autoloader.php';
 
-houseme\wxpay\Autoloader::register();
+Wechat\Autoloader::register();
