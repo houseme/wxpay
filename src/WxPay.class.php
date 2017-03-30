@@ -10,7 +10,7 @@
 
 namespace houseme\wxpay;
 
-class wxpay{
+class WxPay{
     /**
      *
      * 网页授权接口微信服务器返回的数据，返回样例如下
@@ -39,6 +39,22 @@ class wxpay{
             self::$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
         }
     }
+    
+    
+//    public function autoloader($class) {
+//        if (file_exists(dirname(__FILE__) . '/' . $class . '.class.php')) {
+//            require_once(dirname(__FILE__) . '/' . $class . '.class.php');
+//        }
+//    }
+//
+//    /**
+//     * Register the built-in autoloader
+//     *
+//     * @codeCoverageIgnore
+//     */
+//    public static function register_autoloader() {
+//        spl_autoload_register('autoloader');
+//    }
     
     /**
      * @return WxPayConfig
