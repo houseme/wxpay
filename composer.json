@@ -1,7 +1,7 @@
 {
     "name": "houseme/wxpay",
     "description": "Wechat pay library ",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "type": "library",
     "keywords": ["wechat", "pay", "wxpay", "houseme"],
     "homepage": "https://github.com/houseme/wxpay",
