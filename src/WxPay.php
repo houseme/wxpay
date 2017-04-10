@@ -67,10 +67,10 @@ class WxPay{
         //通过code获得openid
         if(!isset($_GET['code'])){
             //触发微信返回code码
-//            $baseUrl = urlencode('http://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . $_SERVER['QUERY_STRING']);
+            //            $baseUrl = urlencode('http://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . $_SERVER['QUERY_STRING']);
             $http_type = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS']=='on') || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO']=='https')) ? 'https://' : 'http://';
-            $baseUrl = urlencode($http_type . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . $_SERVER['QUERY_STRING']);
-            $url     = $this->__CreateOauthUrlForCode($baseUrl);
+            $baseUrl   = urlencode($http_type . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'] . $_SERVER['QUERY_STRING']);
+            $url       = $this->__CreateOauthUrlForCode($baseUrl);
             Header("Location: $url");
             exit();
         }else{
@@ -171,10 +171,11 @@ class WxPay{
      * @return 获取共享收货地址js函数需要的参数，json格式可以直接做参数使用
      */
     public function GetEditAddressParameters(){
+        $http_type           = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS']=='on') || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO']=='https')) ? 'https://' : 'http://';
         $getData             = $this->data;
         $data                = array();
         $data["appid"]       = WxPayConfig::getAppId();
-        $data["url"]         = "http://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+        $data["url"]         = $http_type . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
         $time                = time();
         $data["timestamp"]   = "$time";
         $data["noncestr"]    = "1234568";
