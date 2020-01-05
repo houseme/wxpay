@@ -9,7 +9,7 @@
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 /**
  *
@@ -37,11 +37,12 @@ class WxPayNotifyReply extends WxPayDataBase{
     {
         return $this->values['return_code'];
     }
-    
+
     /**
      *
      * 设置错误信息
-     * @param string $return_code
+     *
+     * @param $return_msg
      */
     public function SetReturn_msg($return_msg)
     {

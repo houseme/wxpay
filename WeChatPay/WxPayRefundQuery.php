@@ -4,20 +4,20 @@
  * Project: WxPayAPI
  * Author: houseme houseme@outlook.com
  * Time: 2017/3/29 16:16
- * FileName: WxPayRefund.class.php
+ * FileName: WxPayRefundQuery.class.php
  * Chinese:
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 /**
  *
- * 提交退款输入对象
+ * 退款查询输入对象
  * @author widyhu
  *
  */
-class WxPayRefund extends WxPayDataBase{
+class WxPayRefundQuery extends WxPayDataBase{
     /**
      * 设置微信分配的公众账号ID
      * @param string $value
@@ -71,7 +71,7 @@ class WxPayRefund extends WxPayDataBase{
     
     
     /**
-     * 设置微信支付分配的终端设备号，与下单一致
+     * 设置微信支付分配的终端设备号
      * @param string $value
      **/
     public function SetDevice_info($value)
@@ -79,7 +79,7 @@ class WxPayRefund extends WxPayDataBase{
         $this->values['device_info'] = $value;
     }
     /**
-     * 获取微信支付分配的终端设备号，与下单一致的值
+     * 获取微信支付分配的终端设备号的值
      * @return 值
      **/
     public function GetDevice_info()
@@ -87,7 +87,7 @@ class WxPayRefund extends WxPayDataBase{
         return $this->values['device_info'];
     }
     /**
-     * 判断微信支付分配的终端设备号，与下单一致是否存在
+     * 判断微信支付分配的终端设备号是否存在
      * @return true 或 false
      **/
     public function IsDevice_infoSet()
@@ -148,7 +148,7 @@ class WxPayRefund extends WxPayDataBase{
     
     
     /**
-     * 设置商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no
+     * 设置商户系统内部的订单号
      * @param string $value
      **/
     public function SetOut_trade_no($value)
@@ -156,7 +156,7 @@ class WxPayRefund extends WxPayDataBase{
         $this->values['out_trade_no'] = $value;
     }
     /**
-     * 获取商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no的值
+     * 获取商户系统内部的订单号的值
      * @return 值
      **/
     public function GetOut_trade_no()
@@ -164,7 +164,7 @@ class WxPayRefund extends WxPayDataBase{
         return $this->values['out_trade_no'];
     }
     /**
-     * 判断商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no是否存在
+     * 判断商户系统内部的订单号是否存在
      * @return true 或 false
      **/
     public function IsOut_trade_noSet()
@@ -174,7 +174,7 @@ class WxPayRefund extends WxPayDataBase{
     
     
     /**
-     * 设置商户系统内部的退款单号，商户系统内部唯一，同一退款单号多次请求只退一笔
+     * 设置商户退款单号
      * @param string $value
      **/
     public function SetOut_refund_no($value)
@@ -182,7 +182,7 @@ class WxPayRefund extends WxPayDataBase{
         $this->values['out_refund_no'] = $value;
     }
     /**
-     * 获取商户系统内部的退款单号，商户系统内部唯一，同一退款单号多次请求只退一笔的值
+     * 获取商户退款单号的值
      * @return 值
      **/
     public function GetOut_refund_no()
@@ -190,7 +190,7 @@ class WxPayRefund extends WxPayDataBase{
         return $this->values['out_refund_no'];
     }
     /**
-     * 判断商户系统内部的退款单号，商户系统内部唯一，同一退款单号多次请求只退一笔是否存在
+     * 判断商户退款单号是否存在
      * @return true 或 false
      **/
     public function IsOut_refund_noSet()
@@ -200,105 +200,27 @@ class WxPayRefund extends WxPayDataBase{
     
     
     /**
-     * 设置订单总金额，单位为分，只能为整数，详见支付金额
+     * 设置微信退款单号refund_id、out_refund_no、out_trade_no、transaction_id四个参数必填一个，如果同时存在优先级为：refund_id>out_refund_no>transaction_id>out_trade_no
      * @param string $value
      **/
-    public function SetTotal_fee($value)
+    public function SetRefund_id($value)
     {
-        $this->values['total_fee'] = $value;
+        $this->values['refund_id'] = $value;
     }
     /**
-     * 获取订单总金额，单位为分，只能为整数，详见支付金额的值
+     * 获取微信退款单号refund_id、out_refund_no、out_trade_no、transaction_id四个参数必填一个，如果同时存在优先级为：refund_id>out_refund_no>transaction_id>out_trade_no的值
      * @return 值
      **/
-    public function GetTotal_fee()
+    public function GetRefund_id()
     {
-        return $this->values['total_fee'];
+        return $this->values['refund_id'];
     }
     /**
-     * 判断订单总金额，单位为分，只能为整数，详见支付金额是否存在
+     * 判断微信退款单号refund_id、out_refund_no、out_trade_no、transaction_id四个参数必填一个，如果同时存在优先级为：refund_id>out_refund_no>transaction_id>out_trade_no是否存在
      * @return true 或 false
      **/
-    public function IsTotal_feeSet()
+    public function IsRefund_idSet()
     {
-        return array_key_exists('total_fee', $this->values);
-    }
-    
-    
-    /**
-     * 设置退款总金额，订单总金额，单位为分，只能为整数，详见支付金额
-     * @param string $value
-     **/
-    public function SetRefund_fee($value)
-    {
-        $this->values['refund_fee'] = $value;
-    }
-    /**
-     * 获取退款总金额，订单总金额，单位为分，只能为整数，详见支付金额的值
-     * @return 值
-     **/
-    public function GetRefund_fee()
-    {
-        return $this->values['refund_fee'];
-    }
-    /**
-     * 判断退款总金额，订单总金额，单位为分，只能为整数，详见支付金额是否存在
-     * @return true 或 false
-     **/
-    public function IsRefund_feeSet()
-    {
-        return array_key_exists('refund_fee', $this->values);
-    }
-    
-    
-    /**
-     * 设置货币类型，符合ISO 4217标准的三位字母代码，默认人民币：CNY，其他值列表详见货币类型
-     * @param string $value
-     **/
-    public function SetRefund_fee_type($value)
-    {
-        $this->values['refund_fee_type'] = $value;
-    }
-    /**
-     * 获取货币类型，符合ISO 4217标准的三位字母代码，默认人民币：CNY，其他值列表详见货币类型的值
-     * @return 值
-     **/
-    public function GetRefund_fee_type()
-    {
-        return $this->values['refund_fee_type'];
-    }
-    /**
-     * 判断货币类型，符合ISO 4217标准的三位字母代码，默认人民币：CNY，其他值列表详见货币类型是否存在
-     * @return true 或 false
-     **/
-    public function IsRefund_fee_typeSet()
-    {
-        return array_key_exists('refund_fee_type', $this->values);
-    }
-    
-    
-    /**
-     * 设置操作员帐号, 默认为商户号
-     * @param string $value
-     **/
-    public function SetOp_user_id($value)
-    {
-        $this->values['op_user_id'] = $value;
-    }
-    /**
-     * 获取操作员帐号, 默认为商户号的值
-     * @return 值
-     **/
-    public function GetOp_user_id()
-    {
-        return $this->values['op_user_id'];
-    }
-    /**
-     * 判断操作员帐号, 默认为商户号是否存在
-     * @return true 或 false
-     **/
-    public function IsOp_user_idSet()
-    {
-        return array_key_exists('op_user_id', $this->values);
+        return array_key_exists('refund_id', $this->values);
     }
 }

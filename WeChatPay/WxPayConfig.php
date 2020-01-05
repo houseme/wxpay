@@ -9,7 +9,7 @@
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 /**
  * 	配置账号信息
@@ -75,15 +75,22 @@ class WxPayConfig{
     private static $sslCertPath;
     private static $sslKeyPath;
     
-    private static $curlProxyHost = "0.0.0.0";
+    private static $curlProxyHost = '0.0.0.0';
     private static $curlProxyPort = 0;
     
     private static $reportLevenl = 1;
     
     private static $notifyUrl="";
-    
+
     /**
      * WxPayConfig constructor.
+     *
+     * @param $appId
+     * @param $mchId
+     * @param $key
+     * @param $appSecret
+     * @param $sslCertPath
+     * @param $sslKeyPath
      */
     public function __construct($appId,$mchId,$key,$appSecret,$sslCertPath,$sslKeyPath){
         self::setAppId($appId);

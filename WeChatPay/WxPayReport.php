@@ -9,7 +9,7 @@
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 /**
  *
@@ -366,7 +366,7 @@ class WxPayReport extends WxPayDataBase{
     }
     /**
      * 获取系统时间，格式为yyyyMMddHHmmss，如2009年12月27日9点10分10秒表示为20091227091010。其他详见时间规则的值
-     * @return 值
+     * @return
      **/
     public function GetTime()
     {

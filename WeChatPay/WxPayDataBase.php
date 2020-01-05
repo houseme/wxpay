@@ -9,7 +9,7 @@
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 
 /**
@@ -21,11 +21,12 @@ namespace Wechat;
  */
 class WxPayDataBase{
     protected $values = array();
-    
+
     /**
      * 设置签名，详见签名生成算法
-     * @param string $value
-     **/
+     *
+     * @return 签名，本函数不覆盖sign成员变量，如要设置签名需要调用SetSign方法赋值
+     */
     public function SetSign()
     {
         $sign = $this->MakeSign();
@@ -60,31 +61,34 @@ class WxPayDataBase{
         if(!is_array($this->values)
            || count($this->values) <= 0)
         {
-            throw new WxPayException("数组数据异常！");
+            throw new WxPayException('数组数据异常！');
         }
         
-        $xml = "<xml>";
+        $xml = '<xml>';
         foreach ($this->values as $key=>$val)
         {
             if (is_numeric($val)){
-                $xml.="<".$key.">".$val."</".$key.">";
+                $xml.='<'.$key.'>'.$val.'</'.$key.'>';
             }else{
-                $xml.="<".$key."><![CDATA[".$val."]]></".$key.">";
+                $xml.='<'.$key.'><![CDATA['.$val.']]></'.$key.'>';
             }
         }
-        $xml.="</xml>";
+        $xml.='</xml>';
         return $xml;
     }
-    
+
     /**
      * 将xml转为array
+     *
      * @param string $xml
+     *
+     * @return array|mixed
      * @throws WxPayException
      */
     public function FromXml($xml)
     {
         if(!$xml){
-            throw new WxPayException("xml数据异常！");
+            throw new WxPayException('xml数据异常！');
         }
         //将XML转为array
         //禁止引用外部xml实体
@@ -98,15 +102,15 @@ class WxPayDataBase{
      */
     public function ToUrlParams()
     {
-        $buff = "";
+        $buff = '';
         foreach ($this->values as $k => $v)
         {
-            if($k != "sign" && $v != "" && !is_array($v)){
-                $buff .= $k . "=" . $v . "&";
+            if($k != 'sign' && $v != '' && !is_array($v)){
+                $buff .= $k . '=' . $v . '&';
             }
         }
         
-        $buff = trim($buff, "&");
+        $buff = trim($buff, '&');
         return $buff;
     }
     
@@ -120,7 +124,7 @@ class WxPayDataBase{
         ksort($this->values);
         $string = $this->ToUrlParams();
         //签名步骤二：在string后加入KEY
-        $string = $string . "&key=".WxPayConfig::KEY;
+        $string = $string . '&key='.WxPayConfig::KEY;
         //签名步骤三：MD5加密
         $string = md5($string);
         //签名步骤四：所有字符转为大写

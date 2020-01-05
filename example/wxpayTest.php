@@ -11,7 +11,7 @@ namespace houseme\wxpaytest;
  */
 //use houseme\wxpay\WxPayConfig as WxPayConfig;
 
-use Wechat\WxPay;
+use WeChatPay\WxPay;
 
 //use houseme\wxpay\WxPayConfig;
 

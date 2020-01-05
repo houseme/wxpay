@@ -3,21 +3,21 @@
  * Created by PhpStorm.
  * Project: WxPayAPI
  * Author: houseme houseme@outlook.com
- * Time: 2017/3/29 11:38
- * FileName: WxPayOrderQuery.class.php
+ * Time: 2017/3/29 16:26
+ * FileName: WxPayBizPayUrl.class.php
  * Chinese:
  */
 
 
-namespace Wechat;
+namespace WeChatPay;
 
 /**
  *
- * 订单查询输入对象
+ * 扫码支付模式一生成二维码参数
  * @author widyhu
  *
  */
-class WxPayOrderQuery extends WxPayDataBase{
+class WxPayBizPayUrl extends WxPayDataBase{
     /**
      * 设置微信分配的公众账号ID
      * @param string $value
@@ -69,61 +69,33 @@ class WxPayOrderQuery extends WxPayDataBase{
         return array_key_exists('mch_id', $this->values);
     }
     
-    
     /**
-     * 设置微信的订单号，优先使用
+     * 设置支付时间戳
      * @param string $value
      **/
-    public function SetTransaction_id($value)
+    public function SetTime_stamp($value)
     {
-        $this->values['transaction_id'] = $value;
+        $this->values['time_stamp'] = $value;
     }
     /**
-     * 获取微信的订单号，优先使用的值
+     * 获取支付时间戳的值
      * @return 值
      **/
-    public function GetTransaction_id()
+    public function GetTime_stamp()
     {
-        return $this->values['transaction_id'];
+        return $this->values['time_stamp'];
     }
     /**
-     * 判断微信的订单号，优先使用是否存在
+     * 判断支付时间戳是否存在
      * @return true 或 false
      **/
-    public function IsTransaction_idSet()
+    public function IsTime_stampSet()
     {
-        return array_key_exists('transaction_id', $this->values);
+        return array_key_exists('time_stamp', $this->values);
     }
     
-    
     /**
-     * 设置商户系统内部的订单号，当没提供transaction_id时需要传这个。
-     * @param string $value
-     **/
-    public function SetOut_trade_no($value)
-    {
-        $this->values['out_trade_no'] = $value;
-    }
-    /**
-     * 获取商户系统内部的订单号，当没提供transaction_id时需要传这个。的值
-     * @return 值
-     **/
-    public function GetOut_trade_no()
-    {
-        return $this->values['out_trade_no'];
-    }
-    /**
-     * 判断商户系统内部的订单号，当没提供transaction_id时需要传这个。是否存在
-     * @return true 或 false
-     **/
-    public function IsOut_trade_noSet()
-    {
-        return array_key_exists('out_trade_no', $this->values);
-    }
-    
-    
-    /**
-     * 设置随机字符串，不长于32位。推荐随机数生成算法
+     * 设置随机字符串
      * @param string $value
      **/
     public function SetNonce_str($value)
@@ -131,7 +103,7 @@ class WxPayOrderQuery extends WxPayDataBase{
         $this->values['nonce_str'] = $value;
     }
     /**
-     * 获取随机字符串，不长于32位。推荐随机数生成算法的值
+     * 获取随机字符串的值
      * @return 值
      **/
     public function GetNonce_str()
@@ -139,11 +111,36 @@ class WxPayOrderQuery extends WxPayDataBase{
         return $this->values['nonce_str'];
     }
     /**
-     * 判断随机字符串，不长于32位。推荐随机数生成算法是否存在
+     * 判断随机字符串是否存在
      * @return true 或 false
      **/
     public function IsNonce_strSet()
     {
         return array_key_exists('nonce_str', $this->values);
+    }
+    
+    /**
+     * 设置商品ID
+     * @param string $value
+     **/
+    public function SetProduct_id($value)
+    {
+        $this->values['product_id'] = $value;
+    }
+    /**
+     * 获取商品ID的值
+     * @return 值
+     **/
+    public function GetProduct_id()
+    {
+        return $this->values['product_id'];
+    }
+    /**
+     * 判断商品ID是否存在
+     * @return true 或 false
+     **/
+    public function IsProduct_idSet()
+    {
+        return array_key_exists('product_id', $this->values);
     }
 }

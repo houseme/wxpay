@@ -1,22 +1,18 @@
 <?php
-
 /**
  * Created by PhpStorm.
  * Project: WxPayAPI
  * Author: houseme houseme@outlook.com
- * Time: 2017/3/29 16:14
- * FileName: WxPayCloseOrder.class.php
+ * Time: 2017/3/29 16:21
+ * FileName: WxPayShortUrl.class.php
  * Chinese:
  */
 
-namespace Wechat;
-/**
- *
- * 关闭订单输入对象
- * @author widyhu
- *
- */
-class WxPayCloseOrder extends WxPayDataBase{
+
+namespace WeChatPay;
+
+
+class WxPayShortUrl extends WxPayDataBase{
     /**
      * 设置微信分配的公众账号ID
      * @param string $value
@@ -70,33 +66,33 @@ class WxPayCloseOrder extends WxPayDataBase{
     
     
     /**
-     * 设置商户系统内部的订单号
+     * 设置需要转换的URL，签名用原串，传输需URL encode
      * @param string $value
      **/
-    public function SetOut_trade_no($value)
+    public function SetLong_url($value)
     {
-        $this->values['out_trade_no'] = $value;
+        $this->values['long_url'] = $value;
     }
     /**
-     * 获取商户系统内部的订单号的值
+     * 获取需要转换的URL，签名用原串，传输需URL encode的值
      * @return 值
      **/
-    public function GetOut_trade_no()
+    public function GetLong_url()
     {
-        return $this->values['out_trade_no'];
+        return $this->values['long_url'];
     }
     /**
-     * 判断商户系统内部的订单号是否存在
+     * 判断需要转换的URL，签名用原串，传输需URL encode是否存在
      * @return true 或 false
      **/
-    public function IsOut_trade_noSet()
+    public function IsLong_urlSet()
     {
-        return array_key_exists('out_trade_no', $this->values);
+        return array_key_exists('long_url', $this->values);
     }
     
     
     /**
-     * 设置商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号
+     * 设置随机字符串，不长于32位。推荐随机数生成算法
      * @param string $value
      **/
     public function SetNonce_str($value)
@@ -104,7 +100,7 @@ class WxPayCloseOrder extends WxPayDataBase{
         $this->values['nonce_str'] = $value;
     }
     /**
-     * 获取商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号的值
+     * 获取随机字符串，不长于32位。推荐随机数生成算法的值
      * @return 值
      **/
     public function GetNonce_str()
@@ -112,7 +108,7 @@ class WxPayCloseOrder extends WxPayDataBase{
         return $this->values['nonce_str'];
     }
     /**
-     * 判断商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号是否存在
+     * 判断随机字符串，不长于32位。推荐随机数生成算法是否存在
      * @return true 或 false
      **/
     public function IsNonce_strSet()

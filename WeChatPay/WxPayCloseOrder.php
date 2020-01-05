@@ -1,23 +1,22 @@
 <?php
+
 /**
  * Created by PhpStorm.
  * Project: WxPayAPI
  * Author: houseme houseme@outlook.com
- * Time: 2017/3/29 16:23
- * FileName: WxPayReverse.class.php
+ * Time: 2017/3/29 16:14
+ * FileName: WxPayCloseOrder.class.php
  * Chinese:
  */
 
-
-namespace Wechat;
-
+namespace WeChatPay;
 /**
  *
- * 撤销输入对象
+ * 关闭订单输入对象
  * @author widyhu
  *
  */
-class WxPayReverse extends WxPayDataBase{
+class WxPayCloseOrder extends WxPayDataBase{
     /**
      * 设置微信分配的公众账号ID
      * @param string $value
@@ -71,33 +70,7 @@ class WxPayReverse extends WxPayDataBase{
     
     
     /**
-     * 设置微信的订单号，优先使用
-     * @param string $value
-     **/
-    public function SetTransaction_id($value)
-    {
-        $this->values['transaction_id'] = $value;
-    }
-    /**
-     * 获取微信的订单号，优先使用的值
-     * @return 值
-     **/
-    public function GetTransaction_id()
-    {
-        return $this->values['transaction_id'];
-    }
-    /**
-     * 判断微信的订单号，优先使用是否存在
-     * @return true 或 false
-     **/
-    public function IsTransaction_idSet()
-    {
-        return array_key_exists('transaction_id', $this->values);
-    }
-    
-    
-    /**
-     * 设置商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no
+     * 设置商户系统内部的订单号
      * @param string $value
      **/
     public function SetOut_trade_no($value)
@@ -105,7 +78,7 @@ class WxPayReverse extends WxPayDataBase{
         $this->values['out_trade_no'] = $value;
     }
     /**
-     * 获取商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no的值
+     * 获取商户系统内部的订单号的值
      * @return 值
      **/
     public function GetOut_trade_no()
@@ -113,7 +86,7 @@ class WxPayReverse extends WxPayDataBase{
         return $this->values['out_trade_no'];
     }
     /**
-     * 判断商户系统内部的订单号,transaction_id、out_trade_no二选一，如果同时存在优先级：transaction_id> out_trade_no是否存在
+     * 判断商户系统内部的订单号是否存在
      * @return true 或 false
      **/
     public function IsOut_trade_noSet()
@@ -123,7 +96,7 @@ class WxPayReverse extends WxPayDataBase{
     
     
     /**
-     * 设置随机字符串，不长于32位。推荐随机数生成算法
+     * 设置商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号
      * @param string $value
      **/
     public function SetNonce_str($value)
@@ -131,7 +104,7 @@ class WxPayReverse extends WxPayDataBase{
         $this->values['nonce_str'] = $value;
     }
     /**
-     * 获取随机字符串，不长于32位。推荐随机数生成算法的值
+     * 获取商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号的值
      * @return 值
      **/
     public function GetNonce_str()
@@ -139,7 +112,7 @@ class WxPayReverse extends WxPayDataBase{
         return $this->values['nonce_str'];
     }
     /**
-     * 判断随机字符串，不长于32位。推荐随机数生成算法是否存在
+     * 判断商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号是否存在
      * @return true 或 false
      **/
     public function IsNonce_strSet()
