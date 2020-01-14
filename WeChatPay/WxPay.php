@@ -94,12 +94,12 @@ class WxPay
     /**
      *
      * 获取jsapi支付的参数
+     * json数据，可直接填入js函数作为参数
      *
      * @param array $UnifiedOrderResult 统一支付接口返回的数据
      *
-     * @return json数据，可直接填入js函数作为参数
+     * @return false|string
      * @throws WxPayException
-     *
      */
     public function GetJsApiParameters($UnifiedOrderResult)
     {
@@ -112,8 +112,8 @@ class WxPay
         $jsapi->SetNonceStr(WxPayApi::getNonceStr());
         $jsapi->SetPackage('prepay_id=' . $UnifiedOrderResult['prepay_id']);
         $jsapi->SetSignType('MD5');
-        $jsapi->SetPaySign($jsapi->MakeSign());
-        return json_encode($jsapi->GetValues());
+        $jsapi->SetPaySign($jsapi->kakeSign());
+        return json_encode($jsapi->getValues());
     }
 
     /**
@@ -296,11 +296,12 @@ class WxPay
     /**
      *
      * 查询订单情况
+     * 成功时返回，其他抛异常 0 订单不成功，1表示订单成功，2表示继续等待
      *
      * @param string $out_trade_no 商户订单号
      * @param int    $succCode     查询订单结果
      *
-     * @return bool|成功时返回，其他抛异常 0 订单不成功，1表示订单成功，2表示继续等待
+     * @return bool| int
      * @throws WxPayException
      */
     public function query($out_trade_no, &$succCode)
@@ -389,10 +390,11 @@ class WxPay
     /**
      *
      * 生成直接支付url，支付url有效期为2小时,模式二
+     * 成功时返回，其他抛异常
      *
      * @param UnifiedOrderInput $input
      *
-     * @return 成功时返回，其他抛异常
+     * @return array
      * @throws WxPayException
      */
     public function GetPayUrl($input)

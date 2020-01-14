@@ -21,10 +21,12 @@ class WxPayShortUrl extends WxPayDataBase{
     {
         $this->values['appid'] = $value;
     }
+
     /**
      * 获取微信分配的公众账号ID的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetAppid()
     {
         return $this->values['appid'];
@@ -47,10 +49,12 @@ class WxPayShortUrl extends WxPayDataBase{
     {
         $this->values['mch_id'] = $value;
     }
+
     /**
      * 获取微信支付分配的商户号的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetMch_id()
     {
         return $this->values['mch_id'];
@@ -73,10 +77,12 @@ class WxPayShortUrl extends WxPayDataBase{
     {
         $this->values['long_url'] = $value;
     }
+
     /**
      * 获取需要转换的URL，签名用原串，传输需URL encode的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetLong_url()
     {
         return $this->values['long_url'];
@@ -99,10 +105,12 @@ class WxPayShortUrl extends WxPayDataBase{
     {
         $this->values['nonce_str'] = $value;
     }
+
     /**
      * 获取随机字符串，不长于32位。推荐随机数生成算法的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetNonce_str()
     {
         return $this->values['nonce_str'];

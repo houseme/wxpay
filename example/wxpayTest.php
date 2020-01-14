@@ -17,7 +17,7 @@ use WeChatPay\WxPay;
 
 //include "../src/WxPayConfig.class.php";
 //include "../src/WxPay.php";
-include_once "../autoload.php";
+include_once '../autoload.php';
 $appId       = '1';
 $mchId       = '2';
 $key         = '3';

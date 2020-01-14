@@ -16,64 +16,68 @@ namespace WeChatPay;
  *
  * 数据对象基础类，该类中定义数据类最基本的行为，包括：
  * 计算/设置/获取签名、输出xml格式的参数、从xml读取数据对象等
+ *
  * @author widyhu
  *
  */
-class WxPayDataBase{
-    protected $values = array();
+class WxPayDataBase
+{
+    protected $values = [];
 
     /**
      * 设置签名，详见签名生成算法
+     * 签名，本函数不覆盖sign成员变量，如要设置签名需要调用SetSign方法赋值
      *
-     * @return 签名，本函数不覆盖sign成员变量，如要设置签名需要调用SetSign方法赋值
+     * @return string
      */
-    public function SetSign()
+    public function setSign()
     {
-        $sign = $this->MakeSign();
+        $sign = $this->makeSign();
         $this->values['sign'] = $sign;
         return $sign;
     }
-    
+
     /**
      * 获取签名，详见签名生成算法的值
-     * @return 值
-     **/
-    public function GetSign()
+     *
+     * @return mixed
+     */
+    public function getSign()
     {
         return $this->values['sign'];
     }
-    
+
     /**
      * 判断签名，详见签名生成算法是否存在
+     *
      * @return true 或 false
      **/
-    public function IsSignSet()
+    public function isSignSet()
     {
         return array_key_exists('sign', $this->values);
     }
-    
+
     /**
      * 输出xml字符
+     *
      * @throws WxPayException
      **/
-    public function ToXml()
+    public function toXml()
     {
-        if(!is_array($this->values)
-           || count($this->values) <= 0)
-        {
+        if (!is_array($this->values)
+            || count($this->values) <= 0) {
             throw new WxPayException('数组数据异常！');
         }
-        
+
         $xml = '<xml>';
-        foreach ($this->values as $key=>$val)
-        {
-            if (is_numeric($val)){
-                $xml.='<'.$key.'>'.$val.'</'.$key.'>';
-            }else{
-                $xml.='<'.$key.'><![CDATA['.$val.']]></'.$key.'>';
+        foreach ($this->values as $key => $val) {
+            if (is_numeric($val)) {
+                $xml .= '<' . $key . '>' . $val . '</' . $key . '>';
+            } else {
+                $xml .= '<' . $key . '><![CDATA[' . $val . ']]></' . $key . '>';
             }
         }
-        $xml.='</xml>';
+        $xml .= '</xml>';
         return $xml;
     }
 
@@ -85,9 +89,9 @@ class WxPayDataBase{
      * @return array|mixed
      * @throws WxPayException
      */
-    public function FromXml($xml)
+    public function fromXml($xml)
     {
-        if(!$xml){
+        if (!$xml) {
             throw new WxPayException('xml数据异常！');
         }
         //将XML转为array
@@ -96,20 +100,19 @@ class WxPayDataBase{
         $this->values = json_decode(json_encode(simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NOCDATA)), true);
         return $this->values;
     }
-    
+
     /**
      * 格式化参数格式化成url参数
      */
-    public function ToUrlParams()
+    public function toUrlParams()
     {
         $buff = '';
-        foreach ($this->values as $k => $v)
-        {
-            if($k != 'sign' && $v != '' && !is_array($v)){
+        foreach ($this->values as $k => $v) {
+            if ($k != 'sign' && $v != '' && !is_array($v)) {
                 $buff .= $k . '=' . $v . '&';
             }
         }
-        
+
         $buff = trim($buff, '&');
         return $buff;
     }
@@ -120,11 +123,11 @@ class WxPayDataBase{
      *
      * @return string
      */
-    public function MakeSign()
+    public function makeSign()
     {
         //签名步骤一：按字典序排序参数
         ksort($this->values);
-        $string = $this->ToUrlParams();
+        $string = $this->toUrlParams();
         //签名步骤二：在string后加入KEY
         $string .= '&key=' . WxPayConfig::KEY;
         //签名步骤三：MD5加密
@@ -132,11 +135,11 @@ class WxPayDataBase{
         //签名步骤四：所有字符转为大写
         return strtoupper($string);
     }
-    
+
     /**
      * 获取设置的值
      */
-    public function GetValues()
+    public function getValues()
     {
         return $this->values;
     }

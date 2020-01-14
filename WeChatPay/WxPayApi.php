@@ -64,10 +64,10 @@ class WxPayApi
         $inputObj->SetMch_id(WxPayConfig::getMchId());          //商户号
         $inputObj->SetSpbill_create_ip($_SERVER['REMOTE_ADDR']);//终端ip
         //$inputObj->SetSpbill_create_ip("1.1.1.1");
-        $inputObj->SetNonce_str(self::getNonceStr());           //随机字符串
+        $inputObj->setNonceStr(self::getNonceStr());           //随机字符串
 
         //签名
-        $inputObj->SetSign();
+        $inputObj->setSign();
         $xml = $inputObj->ToXml();
 
         $startTimeStamp = self::getMillisecond();//请求开始时间
@@ -405,9 +405,9 @@ class WxPayApi
         $inputObj->SetTime_stamp(time());             //时间戳
         $inputObj->SetNonce_str(self::getNonceStr()); //随机字符串
 
-        $inputObj->SetSign();//签名
+        $inputObj->setSign();//签名
 
-        return $inputObj->GetValues();
+        return $inputObj->getValues();
     }
 
     /**
