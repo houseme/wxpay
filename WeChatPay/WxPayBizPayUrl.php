@@ -26,10 +26,12 @@ class WxPayBizPayUrl extends WxPayDataBase{
     {
         $this->values['appid'] = $value;
     }
+
     /**
      * 获取微信分配的公众账号ID的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetAppid()
     {
         return $this->values['appid'];
@@ -52,10 +54,12 @@ class WxPayBizPayUrl extends WxPayDataBase{
     {
         $this->values['mch_id'] = $value;
     }
+
     /**
      * 获取微信支付分配的商户号的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetMch_id()
     {
         return $this->values['mch_id'];
@@ -77,10 +81,12 @@ class WxPayBizPayUrl extends WxPayDataBase{
     {
         $this->values['time_stamp'] = $value;
     }
+
     /**
      * 获取支付时间戳的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetTime_stamp()
     {
         return $this->values['time_stamp'];
@@ -102,10 +108,12 @@ class WxPayBizPayUrl extends WxPayDataBase{
     {
         $this->values['nonce_str'] = $value;
     }
+
     /**
      * 获取随机字符串的值
-     * @return 值
-     **/
+     *
+     * @return string
+     */
     public function GetNonce_str()
     {
         return $this->values['nonce_str'];
@@ -127,10 +135,12 @@ class WxPayBizPayUrl extends WxPayDataBase{
     {
         $this->values['product_id'] = $value;
     }
+
     /**
      * 获取商品ID的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetProduct_id()
     {
         return $this->values['product_id'];

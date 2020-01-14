@@ -25,10 +25,12 @@ class WxPayCloseOrder extends WxPayDataBase{
     {
         $this->values['appid'] = $value;
     }
+
     /**
      * 获取微信分配的公众账号ID的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetAppid()
     {
         return $this->values['appid'];
@@ -51,10 +53,12 @@ class WxPayCloseOrder extends WxPayDataBase{
     {
         $this->values['mch_id'] = $value;
     }
+
     /**
      * 获取微信支付分配的商户号的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetMch_id()
     {
         return $this->values['mch_id'];
@@ -77,10 +81,12 @@ class WxPayCloseOrder extends WxPayDataBase{
     {
         $this->values['out_trade_no'] = $value;
     }
+
     /**
      * 获取商户系统内部的订单号的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetOut_trade_no()
     {
         return $this->values['out_trade_no'];
@@ -103,10 +109,12 @@ class WxPayCloseOrder extends WxPayDataBase{
     {
         $this->values['nonce_str'] = $value;
     }
+
     /**
      * 获取商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function GetNonce_str()
     {
         return $this->values['nonce_str'];
