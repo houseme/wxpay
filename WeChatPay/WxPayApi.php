@@ -37,32 +37,32 @@ class WxPayApi
     {
         $url = 'https://api.mch.weixin.qq.com/pay/unifiedorder';
         //检测必填参数
-        if (!$inputObj->IsOut_trade_noSet()) {
+        if (!$inputObj->isOutTradeNoSet()) {
             throw new WxPayException('缺少统一支付接口必填参数out_trade_no！');
-        } else if (!$inputObj->IsBodySet()) {
+        } else if (!$inputObj->isBodySet()) {
             throw new WxPayException('缺少统一支付接口必填参数body！');
-        } else if (!$inputObj->IsTotal_feeSet()) {
+        } else if (!$inputObj->isTotalFeeSet()) {
             throw new WxPayException('缺少统一支付接口必填参数total_fee！');
-        } else if (!$inputObj->IsTrade_typeSet()) {
+        } else if (!$inputObj->isTradeTypeSet()) {
             throw new WxPayException('缺少统一支付接口必填参数trade_type！');
         }
 
         //关联参数
-        if ($inputObj->GetTrade_type() == 'JSAPI' && !$inputObj->IsOpenidSet()) {
+        if ($inputObj->getTradeType() == 'JSAPI' && !$inputObj->isOpenidSet()) {
             throw new WxPayException('统一支付接口中，缺少必填参数openid！trade_type为JSAPI时，openid为必填参数！');
         }
-        if ($inputObj->GetTrade_type() == 'NATIVE' && !$inputObj->IsProduct_idSet()) {
+        if ($inputObj->getTradeType() == 'NATIVE' && !$inputObj->isProductIdSet()) {
             throw new WxPayException('统一支付接口中，缺少必填参数product_id！trade_type为JSAPI时，product_id为必填参数！');
         }
 
         //异步通知url未设置，则使用配置文件中的url
-        if (!$inputObj->IsNotify_urlSet()) {
-            $inputObj->SetNotify_url(WxPayConfig::getNotifyUrl());//异步通知url
+        if (!$inputObj->isNotifyUrlSet()) {
+            $inputObj->setNotifyUrl(WxPayConfig::getNotifyUrl());//异步通知url
         }
 
-        $inputObj->SetAppid(WxPayConfig::getAppId());           //公众账号ID
-        $inputObj->SetMch_id(WxPayConfig::getMchId());          //商户号
-        $inputObj->SetSpbill_create_ip($_SERVER['REMOTE_ADDR']);//终端ip
+        $inputObj->setAppId(WxPayConfig::getAppId());           //公众账号ID
+        $inputObj->setMchId(WxPayConfig::getMchId());          //商户号
+        $inputObj->setSpbillCreateIip($_SERVER['REMOTE_ADDR']);//终端ip
         //$inputObj->SetSpbill_create_ip("1.1.1.1");
         $inputObj->setNonceStr(self::getNonceStr());           //随机字符串
 
@@ -94,12 +94,12 @@ class WxPayApi
     {
         $url = 'https://api.mch.weixin.qq.com/pay/orderquery';
         //检测必填参数
-        if (!$inputObj->IsOut_trade_noSet() && !$inputObj->IsTransaction_idSet()) {
+        if (!$inputObj->isOutTradeNoSet() && !$inputObj->isTransactionIdSet()) {
             throw new WxPayException('订单查询接口中，out_trade_no、transaction_id至少填一个！');
         }
-        $inputObj->SetAppid(WxPayConfig::getAppId()); //公众账号ID
-        $inputObj->SetMch_id(WxPayConfig::getMchId());//商户号
-        $inputObj->SetNonce_str(self::getNonceStr()); //随机字符串
+        $inputObj->setAppId(WxPayConfig::getAppId()); //公众账号ID
+        $inputObj->setMchId(WxPayConfig::getMchId());//商户号
+        $inputObj->setNonceStr(self::getNonceStr()); //随机字符串
 
         $inputObj->SetSign();//签名
         $xml = $inputObj->ToXml();

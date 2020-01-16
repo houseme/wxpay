@@ -22,15 +22,17 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 设置微信分配的公众账号ID
      * @param string $value
      **/
-    public function SetAppid($value)
+    public function setAppId($value)
     {
         $this->values['appid'] = $value;
     }
+
     /**
      * 获取微信分配的公众账号ID的值
-     * @return 值
-     **/
-    public function GetAppid()
+     *
+     * @return mixed
+     */
+    public function getAppId()
     {
         return $this->values['appid'];
     }
@@ -38,7 +40,7 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 判断微信分配的公众账号ID是否存在
      * @return true 或 false
      **/
-    public function IsAppidSet()
+    public function isAppidSet()
     {
         return array_key_exists('appid', $this->values);
     }
@@ -48,15 +50,17 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 设置微信支付分配的商户号
      * @param string $value
      **/
-    public function SetMch_id($value)
+    public function setMchId($value)
     {
         $this->values['mch_id'] = $value;
     }
+
     /**
      * 获取微信支付分配的商户号的值
-     * @return 值
-     **/
-    public function GetMch_id()
+     *
+     * @return mixed
+     */
+    public function getMchId()
     {
         return $this->values['mch_id'];
     }
@@ -64,7 +68,7 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 判断微信支付分配的商户号是否存在
      * @return true 或 false
      **/
-    public function IsMch_idSet()
+    public function isMchIdSet()
     {
         return array_key_exists('mch_id', $this->values);
     }
@@ -74,15 +78,17 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 设置微信的订单号，优先使用
      * @param string $value
      **/
-    public function SetTransaction_id($value)
+    public function setTransactionId($value)
     {
         $this->values['transaction_id'] = $value;
     }
+
     /**
      * 获取微信的订单号，优先使用的值
-     * @return 值
-     **/
-    public function GetTransaction_id()
+     *
+     * @return mixed
+     */
+    public function getTransactionId()
     {
         return $this->values['transaction_id'];
     }
@@ -90,7 +96,7 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 判断微信的订单号，优先使用是否存在
      * @return true 或 false
      **/
-    public function IsTransaction_idSet()
+    public function isTransactionIdSet()
     {
         return array_key_exists('transaction_id', $this->values);
     }
@@ -100,15 +106,17 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 设置商户系统内部的订单号，当没提供transaction_id时需要传这个。
      * @param string $value
      **/
-    public function SetOut_trade_no($value)
+    public function setOutTradeNo($value)
     {
         $this->values['out_trade_no'] = $value;
     }
+
     /**
      * 获取商户系统内部的订单号，当没提供transaction_id时需要传这个。的值
-     * @return 值
-     **/
-    public function GetOut_trade_no()
+     *
+     * @return mixed
+     */
+    public function getOutTradeNo()
     {
         return $this->values['out_trade_no'];
     }
@@ -116,7 +124,7 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 判断商户系统内部的订单号，当没提供transaction_id时需要传这个。是否存在
      * @return true 或 false
      **/
-    public function IsOut_trade_noSet()
+    public function isOutTradeNoSet()
     {
         return array_key_exists('out_trade_no', $this->values);
     }
@@ -126,15 +134,17 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 设置随机字符串，不长于32位。推荐随机数生成算法
      * @param string $value
      **/
-    public function SetNonce_str($value)
+    public function setNonceStr($value)
     {
         $this->values['nonce_str'] = $value;
     }
+
     /**
      * 获取随机字符串，不长于32位。推荐随机数生成算法的值
-     * @return 值
-     **/
-    public function GetNonce_str()
+     *
+     * @return mixed
+     */
+    public function getNonceStr()
     {
         return $this->values['nonce_str'];
     }
@@ -142,7 +152,7 @@ class WxPayOrderQuery extends WxPayDataBase{
      * 判断随机字符串，不长于32位。推荐随机数生成算法是否存在
      * @return true 或 false
      **/
-    public function IsNonce_strSet()
+    public function isNonceStrSet()
     {
         return array_key_exists('nonce_str', $this->values);
     }
