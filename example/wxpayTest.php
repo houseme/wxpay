@@ -12,6 +12,7 @@ namespace houseme\wxpaytest;
 //use houseme\wxpay\WxPayConfig as WxPayConfig;
 
 use WeChatPay\WxPay;
+use WeChatPay\WxPayConfig;
 
 //use houseme\wxpay\WxPayConfig;
 
@@ -24,7 +25,7 @@ $key         = '3';
 $appSecret   = '4';
 $sslCertPath = '111/32.txt';
 $sslKeyPath  = '123';
-//$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
+$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
 $wxPay       = new WxPay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
 $wxPayConfig = WxPay::getWxPayConfig();
 var_dump($wxPayConfig::getAppId());
@@ -40,4 +41,4 @@ var_dump($wxPayConfig::getAppId());
 
 //var_dump($wxPayConfig::getCurlProxyHost());
 
-//$wxPay = new wxpay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
+$wxPay = new WxPay($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
