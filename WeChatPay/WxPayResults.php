@@ -29,7 +29,7 @@ class WxPayResults extends WxPayDataBase{
             throw new WxPayException('签名错误！');
         }
         
-        $sign = $this->kakeSign();
+        $sign = $this->makeSign();
         if($this->getSign() == $sign){
             return true;
         }
@@ -93,7 +93,7 @@ class WxPayResults extends WxPayDataBase{
         if($obj->values['return_code'] != 'SUCCESS'){
             return $obj->getValues();
         }
-        $obj->gheckSign();
+        $obj->checkSign();
         return $obj->getValues();
     }
 }

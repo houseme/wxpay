@@ -22,7 +22,7 @@ class WxPayUnifiedOrder extends WxPayDataBase{
      * 设置微信分配的公众账号ID
      * @param string $value
      **/
-    public function setAppid($value)
+    public function setAppId($value)
     {
         $this->values['appid'] = $value;
     }
@@ -32,7 +32,7 @@ class WxPayUnifiedOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function getAppid()
+    public function getAppId()
     {
         return $this->values['appid'];
     }
@@ -40,7 +40,7 @@ class WxPayUnifiedOrder extends WxPayDataBase{
      * 判断微信分配的公众账号ID是否存在
      * @return true 或 false
      **/
-    public function isAppidSet()
+    public function isAppIdSet()
     {
         return array_key_exists('appid', $this->values);
     }
@@ -497,7 +497,7 @@ class WxPayUnifiedOrder extends WxPayDataBase{
      * 设置trade_type=JSAPI，此参数必传，用户在商户appid下的唯一标识。下单前需要调用【网页授权获取用户信息】接口获取到用户的Openid。
      * @param string $value
      **/
-    public function setOpenid($value)
+    public function setOpenId($value)
     {
         $this->values['openid'] = $value;
     }
@@ -507,7 +507,7 @@ class WxPayUnifiedOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function getOpenid()
+    public function getOpenId()
     {
         return $this->values['openid'];
     }

@@ -17,7 +17,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 设置微信分配的公众账号ID
      * @param string $value
      **/
-    public function SetAppid($value)
+    public function setAppId($value)
     {
         $this->values['appid'] = $value;
     }
@@ -27,7 +27,7 @@ class WxPayShortUrl extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetAppid()
+    public function getAppId()
     {
         return $this->values['appid'];
     }
@@ -35,7 +35,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 判断微信分配的公众账号ID是否存在
      * @return true 或 false
      **/
-    public function IsAppidSet()
+    public function isAppIdSet()
     {
         return array_key_exists('appid', $this->values);
     }
@@ -45,7 +45,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 设置微信支付分配的商户号
      * @param string $value
      **/
-    public function SetMch_id($value)
+    public function setMchId($value)
     {
         $this->values['mch_id'] = $value;
     }
@@ -55,7 +55,7 @@ class WxPayShortUrl extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetMch_id()
+    public function getMchId()
     {
         return $this->values['mch_id'];
     }
@@ -63,7 +63,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 判断微信支付分配的商户号是否存在
      * @return true 或 false
      **/
-    public function IsMch_idSet()
+    public function isMchIdSet()
     {
         return array_key_exists('mch_id', $this->values);
     }
@@ -73,7 +73,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 设置需要转换的URL，签名用原串，传输需URL encode
      * @param string $value
      **/
-    public function SetLong_url($value)
+    public function setLongUrl($value)
     {
         $this->values['long_url'] = $value;
     }
@@ -83,7 +83,7 @@ class WxPayShortUrl extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetLong_url()
+    public function getLongUrl()
     {
         return $this->values['long_url'];
     }
@@ -91,7 +91,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 判断需要转换的URL，签名用原串，传输需URL encode是否存在
      * @return true 或 false
      **/
-    public function IsLong_urlSet()
+    public function isLongUrlSet()
     {
         return array_key_exists('long_url', $this->values);
     }
@@ -101,7 +101,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 设置随机字符串，不长于32位。推荐随机数生成算法
      * @param string $value
      **/
-    public function SetNonce_str($value)
+    public function setNonceStr($value)
     {
         $this->values['nonce_str'] = $value;
     }
@@ -111,7 +111,7 @@ class WxPayShortUrl extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetNonce_str()
+    public function getNonceStr()
     {
         return $this->values['nonce_str'];
     }
@@ -119,7 +119,7 @@ class WxPayShortUrl extends WxPayDataBase{
      * 判断随机字符串，不长于32位。推荐随机数生成算法是否存在
      * @return true 或 false
      **/
-    public function IsNonce_strSet()
+    public function isNonceStrSet()
     {
         return array_key_exists('nonce_str', $this->values);
     }

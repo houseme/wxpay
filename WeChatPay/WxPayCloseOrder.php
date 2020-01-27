@@ -21,7 +21,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 设置微信分配的公众账号ID
      * @param string $value
      **/
-    public function SetAppid($value)
+    public function setAppId($value)
     {
         $this->values['appid'] = $value;
     }
@@ -31,7 +31,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetAppid()
+    public function getAppId()
     {
         return $this->values['appid'];
     }
@@ -39,7 +39,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 判断微信分配的公众账号ID是否存在
      * @return true 或 false
      **/
-    public function IsAppidSet()
+    public function isAppIdSet()
     {
         return array_key_exists('appid', $this->values);
     }
@@ -49,7 +49,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 设置微信支付分配的商户号
      * @param string $value
      **/
-    public function SetMch_id($value)
+    public function setMchId($value)
     {
         $this->values['mch_id'] = $value;
     }
@@ -59,7 +59,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetMch_id()
+    public function getMchId()
     {
         return $this->values['mch_id'];
     }
@@ -67,7 +67,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 判断微信支付分配的商户号是否存在
      * @return true 或 false
      **/
-    public function IsMch_idSet()
+    public function isMchIdSet()
     {
         return array_key_exists('mch_id', $this->values);
     }
@@ -77,7 +77,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 设置商户系统内部的订单号
      * @param string $value
      **/
-    public function SetOut_trade_no($value)
+    public function setOutTradeNo($value)
     {
         $this->values['out_trade_no'] = $value;
     }
@@ -87,7 +87,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetOut_trade_no()
+    public function getOutTradeNo()
     {
         return $this->values['out_trade_no'];
     }
@@ -95,7 +95,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 判断商户系统内部的订单号是否存在
      * @return true 或 false
      **/
-    public function IsOut_trade_noSet()
+    public function isOutTradeNoSet()
     {
         return array_key_exists('out_trade_no', $this->values);
     }
@@ -105,7 +105,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 设置商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号
      * @param string $value
      **/
-    public function SetNonce_str($value)
+    public function setNonceStr($value)
     {
         $this->values['nonce_str'] = $value;
     }
@@ -115,7 +115,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      *
      * @return mixed
      */
-    public function GetNonce_str()
+    public function getNonceStr()
     {
         return $this->values['nonce_str'];
     }
@@ -123,7 +123,7 @@ class WxPayCloseOrder extends WxPayDataBase{
      * 判断商户系统内部的订单号,32个字符内、可包含字母, 其他说明见商户订单号是否存在
      * @return true 或 false
      **/
-    public function IsNonce_strSet()
+    public function isNonceStrSet()
     {
         return array_key_exists('nonce_str', $this->values);
     }

@@ -40,7 +40,7 @@ class WxPayReverse extends WxPayDataBase{
      * 判断微信分配的公众账号ID是否存在
      * @return true 或 false
      **/
-    public function isAppidSet()
+    public function isAppIdSet()
     {
         return array_key_exists('appid', $this->values);
     }

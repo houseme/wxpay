@@ -29,7 +29,7 @@ class WxPay
      */
     public $data = null;
     private $curl_timeout = 0;
-    private static $wxPayConfig;
+    private static $wxPayConfig = null;
 
     /**
      * WxPayConfig constructor.
@@ -43,7 +43,7 @@ class WxPay
      */
     public function __construct($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath)
     {
-        if (self::$wxPayConfig == null) {
+        if (self::$wxPayConfig === null) {
             self::$wxPayConfig = new WxPayConfig($appId, $mchId, $key, $appSecret, $sslCertPath, $sslKeyPath);
         }
     }
@@ -71,7 +71,7 @@ class WxPay
      * 1、设置自己需要调回的url及其其他参数，跳转到微信服务器https://open.weixin.qq.com/connect/oauth2/authorize
      * 2、微信服务处理完成之后会跳转回用户redirect_uri地址，此时会带上一些参数，如：code
      *
-     * @return $openid
+     * @return string $openid
      */
     public function GetOpenid()
     {
@@ -101,18 +101,18 @@ class WxPay
      * @return false|string
      * @throws WxPayException
      */
-    public function GetJsApiParameters($UnifiedOrderResult)
+    public function getJsApiParameters($UnifiedOrderResult)
     {
         if (!array_key_exists('appid', $UnifiedOrderResult) || !array_key_exists('prepay_id', $UnifiedOrderResult) || $UnifiedOrderResult['prepay_id'] == '') {
             throw new WxPayException('参数错误');
         }
         $jsapi = new WxPayJsApiPay();
-        $jsapi->SetAppid($UnifiedOrderResult['appid']);
-        $jsapi->SetTimeStamp('$timeStamp');
-        $jsapi->SetNonceStr(WxPayApi::getNonceStr());
-        $jsapi->SetPackage('prepay_id=' . $UnifiedOrderResult['prepay_id']);
-        $jsapi->SetSignType('MD5');
-        $jsapi->SetPaySign($jsapi->kakeSign());
+        $jsapi->setAppId($UnifiedOrderResult['appid']);
+        $jsapi->setTimeStamp('$timeStamp');
+        $jsapi->setNonceStr(WxPayApi::getNonceStr());
+        $jsapi->setPackage('prepay_id=' . $UnifiedOrderResult['prepay_id']);
+        $jsapi->setSignType('MD5');
+        $jsapi->setPaySign($jsapi->makeSign());
         return json_encode($jsapi->getValues());
     }
 
@@ -122,9 +122,9 @@ class WxPay
      *
      * @param string $code 微信跳转回来带上的code
      *
-     * @return
+     * @return string
      */
-    public function GetOpenidFromMp($code)
+    public function getOpenidFromMp($code)
     {
         $url = $this->createOauthUrlForOpenid($code);
         //初始化curl
@@ -156,9 +156,9 @@ class WxPay
      * @param array $urlObj
      * 返回已经拼接好的字符串
      *
-     * @return
+     * @return string
      */
-    private function ToUrlParams($urlObj)
+    private function toUrlParams($urlObj)
     {
         $buff = '';
         foreach ($urlObj as $k => $v) {
@@ -177,21 +177,20 @@ class WxPay
      * 获取地址js参数
      * 获取共享收货地址js函数需要的参数，json格式可以直接做参数使用
      *
-     * @return
+     * @return string
      */
-    public function GetEditAddressParameters()
+    public function getEditAddressParameters()
     {
         $http_type = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https')) ? 'https://' : 'http://';
         $getData = $this->data;
         $data = [];
         $data['appid'] = WxPayConfig::getAppId();
         $data['url'] = $http_type . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
-        $time = time();
-        $data['timestamp'] = '$time';
+        $data['timestamp'] = time();
         $data['noncestr'] = '1234568';
         $data['accesstoken'] = $getData['access_token'];
         ksort($data);
-        $params = $this->ToUrlParams($data);
+        $params = $this->toUrlParams($data);
         $addrSign = sha1($params);
 
         $afterData = [
@@ -210,7 +209,8 @@ class WxPay
      * 构造获取code的url连接
      *
      * @param string $redirectUrl 微信服务器回跳的url，需要url编码
-     * 返回构造好的url
+     *                            返回构造好的url
+     *
      * @return
      */
     private function createOauthUrlForCode($redirectUrl)
@@ -220,18 +220,18 @@ class WxPay
         $urlObj['response_type'] = 'code';
         $urlObj['scope'] = 'snsapi_base';
         $urlObj['state'] = 'STATE' . '#wechat_redirect';
-        $bizString = $this->ToUrlParams($urlObj);
+        $bizString = $this->toUrlParams($urlObj);
 
         return 'https://open.weixin.qq.com/connect/oauth2/authorize?' . $bizString;
     }
 
     /**
      *
-     * 构造获取open和access_toke的url地址
+     * 构造获取open和access_toke的url地址 返回请求的url
      *
      * @param string $code ，微信跳转带回的code
      *
-     * @return 请求的url
+     * @return string
      */
     private function createOauthUrlForOpenid($code)
     {
@@ -239,7 +239,7 @@ class WxPay
         $urlObj['secret'] = WxPayConfig::getAppSecret();
         $urlObj['code'] = $code;
         $urlObj['grant_type'] = 'authorization_code';
-        $bizString = $this->ToUrlParams($urlObj);
+        $bizString = $this->toUrlParams($urlObj);
 
         return 'https://api.weixin.qq.com/sns/oauth2/access_token?' . $bizString;
     }
@@ -250,7 +250,8 @@ class WxPay
      *
      * @param WxPayMicroPay $microPayInput
      * 返回查询接口的结果
-     * @return
+     *
+     * @return bool|int
      * @throws WxpayException
      */
     public function pay($microPayInput)
@@ -263,7 +264,7 @@ class WxPay
             throw new WxPayException('接口调用失败！');
         }
         //签名验证
-        $out_trade_no = $microPayInput->GetOut_trade_no();
+        $out_trade_no = $microPayInput->getOutTradeNo();
         //②、接口调用成功，明确返回调用失败
         if ($result['return_code'] == 'SUCCESS' && $result['result_code'] == 'FAIL' && $result['err_code'] != 'USERPAYING' && $result['err_code'] != 'SYSTEMERROR') {
             return false;
@@ -307,7 +308,7 @@ class WxPay
     public function query($out_trade_no, &$succCode)
     {
         $queryOrderInput = new WxPayOrderQuery();
-        $queryOrderInput->SetOut_trade_no($out_trade_no);
+        $queryOrderInput->setOutTradeNo($out_trade_no);
         $result = WxPayApi::orderQuery($queryOrderInput);
 
         if ($result['return_code'] == 'SUCCESS' && $result['result_code'] == 'SUCCESS') {
@@ -352,7 +353,7 @@ class WxPay
         }
 
         $clostOrder = new WxPayReverse();
-        $clostOrder->SetOut_trade_no($out_trade_no);
+        $clostOrder->setOutTradeNo($out_trade_no);
         $result = WxPayApi::reverse($clostOrder);
 
         //接口调用失败
@@ -379,12 +380,12 @@ class WxPay
      * @return string
      * @throws WxPayException
      */
-    public function GetPrePayUrl($productId)
+    public function getPrePayUrl($productId)
     {
         $biz = new WxPayBizPayUrl();
-        $biz->SetProduct_id($productId);
-        $values = WxpayApi::bizpayurl($biz);
-        return 'weixin://wxpay/bizpayurl?' . $this->ToUrlParams($values);
+        $biz->setProductId($productId);
+        $values = WxpayApi::bizPayUrl($biz);
+        return 'weixin://wxpay/bizpayurl?' . $this->toUrlParams($values);
     }
 
     /**
@@ -392,14 +393,14 @@ class WxPay
      * 生成直接支付url，支付url有效期为2小时,模式二
      * 成功时返回，其他抛异常
      *
-     * @param UnifiedOrderInput $input
+     * @param WxPayUnifiedOrder $input
      *
      * @return array
      * @throws WxPayException
      */
-    public function GetPayUrl($input)
+    public function getPayUrl($input)
     {
-        if ($input->GetTrade_type() == 'NATIVE') {
+        if ($input->getTradeType() == 'NATIVE') {
             return WxPayApi::unifiedOrder($input);
         }
     }

@@ -78,9 +78,9 @@ class WxPayConfig{
     private static $curlProxyHost = '0.0.0.0';
     private static $curlProxyPort = 0;
     
-    private static $reportLevenl = 1;
+    private static $reportLevel = 1;
     
-    private static $notifyUrl="";
+    private static $notifyUrl= '';
 
     /**
      * WxPayConfig constructor.
@@ -216,15 +216,15 @@ class WxPayConfig{
     /**
      * @return int
      */
-    public static function getReportLevenl(){
-        return self::$reportLevenl;
+    public static function getReportLevel(){
+        return self::$reportLevel;
     }
     
     /**
-     * @param int $reportLevenl
+     * @param int $reportLevel
      */
-    public static function setReportLevenl($reportLevenl){
-        self::$reportLevenl = $reportLevenl;
+    public static function setReportLevel($reportLevel){
+        self::$reportLevel = $reportLevel;
     }
     
     /**
