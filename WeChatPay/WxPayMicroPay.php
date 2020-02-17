@@ -333,10 +333,12 @@ class WxPayMicroPay extends WxPayDataBase{
     {
         $this->values['time_start'] = $value;
     }
+
     /**
      * 获取订单生成时间，格式为yyyyMMddHHmmss，如2009年12月25日9点10分10秒表示为20091225091010。详见时间规则的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function getTimeStart()
     {
         return $this->values['time_start'];
@@ -387,10 +389,12 @@ class WxPayMicroPay extends WxPayDataBase{
     {
         $this->values['goods_tag'] = $value;
     }
+
     /**
      * 获取商品标记，代金券或立减优惠功能的参数，说明详见代金券或立减优惠的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function getGoodsTag()
     {
         return $this->values['goods_tag'];

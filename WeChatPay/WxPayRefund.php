@@ -243,10 +243,12 @@ class WxPayRefund extends WxPayDataBase{
     {
         $this->values['refund_fee'] = $value;
     }
+
     /**
      * 获取退款总金额，订单总金额，单位为分，只能为整数，详见支付金额的值
-     * @return 值
-     **/
+     *
+     * @return mixed
+     */
     public function getRefundFee()
     {
         return $this->values['refund_fee'];

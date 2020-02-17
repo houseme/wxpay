@@ -73,7 +73,7 @@ class WxPayNotify extends WxPayNotifyReply
         $msg = 'OK';
         $result = $this->notifyProcess($data, $msg);
 
-        if ($result == true) {
+        if ($result === true) {
             $this->setReturnCode('SUCCESS');
             $this->setReturnMsg('OK');
         } else {
@@ -97,7 +97,7 @@ class WxPayNotify extends WxPayNotifyReply
     private function replyNotify($needSign = true, $returnCode = false)
     {
         //如果需要签名
-        if ($needSign == true && $this->getReturnCode($returnCode) == 'SUCCESS') {
+        if ($needSign === true && $this->getReturnCode($returnCode) == 'SUCCESS') {
             $this->SetSign();
         }
         WxpayApi::replyNotify($this->toXml());

@@ -273,13 +273,13 @@ class WxPay
         //③、确认支付是否成功
         $queryTimes = 10;
         while ($queryTimes > 0) {
-            $succResult = 0;
-            $queryResult = $this->query($out_trade_no, $succResult);
+            $successResult = 0;
+            $queryResult = $this->query($out_trade_no, $successResult);
             //如果需要等待1s后继续
-            if ($succResult == 2) {
+            if ($successResult === 2) {
                 sleep(2);
                 continue;
-            } else if ($succResult == 1) {//查询成功
+            } elseif ($successResult === 1) {//查询成功
                 return $queryResult;
             } else {//订单交易失败
                 return false;
@@ -352,9 +352,9 @@ class WxPay
             return false;
         }
 
-        $clostOrder = new WxPayReverse();
-        $clostOrder->setOutTradeNo($out_trade_no);
-        $result = WxPayApi::reverse($clostOrder);
+        $closeOrder = new WxPayReverse();
+        $closeOrder->setOutTradeNo($out_trade_no);
+        $result = WxPayApi::reverse($closeOrder);
 
         //接口调用失败
         if ($result['return_code'] != 'SUCCESS') {
