@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use serde::Serialize;
 
-use crate::error::{WxPayError, WxPayResult};
+use crate::error::WxPayResult;
 use crate::utils::nonce::generate_nonce;
 use crate::utils::timestamp::get_timestamp;
 
@@ -206,6 +206,7 @@ impl WxPayRequest {
 /// 微信支付请求构建器
 ///
 /// 专门用于构建微信支付 API 请求的构建器。
+#[allow(dead_code)]
 pub struct WxPayRequestBuilder {
     /// 商户号
     merchant_id: String,

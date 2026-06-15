@@ -18,17 +18,19 @@ use crate::error::{WxPayError, WxPayResult};
 /// ```rust,no_run
 /// use wxpay_rs::cert::CertManager;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let manager = CertManager::new();
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let manager = CertManager::new();
 ///
-/// // 添加证书
-/// let cert_der = std::fs::read("path/to/platform_cert.der")?;
-/// manager.add_certificate("CERT123456".to_string(), cert_der).await?;
+///     // 添加证书
+///     let cert_der = std::fs::read("path/to/platform_cert.der")?;
+///     manager.add_certificate("CERT123456".to_string(), cert_der).await?;
 ///
-/// // 查询证书
-/// let cert = manager.get_certificate("CERT123456").await;
-/// # Ok(())
-/// # }
+///     // 查询证书
+///     let cert = manager.get_certificate("CERT123456").await;
+///     let _ = cert;
+///     Ok(())
+/// }
 /// ```
 pub struct CertManager {
     /// 证书存储（序列号 -> 证书）
@@ -182,13 +184,6 @@ impl Clone for CertManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // 测试用的自签名证书（DER 格式）
-    // 注意：这是一个示例证书，实际测试需要使用真实的证书
-    const TEST_CERT_DER: &[u8] = &[
-        0x30, 0x82, 0x01, 0x00, 0x30, 0x82, 0x01, 0x00, 0x30, 0x82, 0x01, 0x00,
-        // ... 省略完整证书数据
-    ];
 
     #[tokio::test]
     async fn test_cert_manager_new() {

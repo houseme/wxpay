@@ -5,10 +5,11 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{WxPayError, WxPayResult};
-use crate::http::HttpClient;
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
+use crate::error::WxPayResult;
+use crate::http::{HttpClient, HttpMethod};
+use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 退款请求
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +68,12 @@ pub struct RefundResponse {
     pub amount: Option<RefundAmount>,
 }
 
+/// 查询退款请求
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryRefundRequest {
+    pub out_refund_no: String,
+}
+
 /// 退款服务
 ///
 /// 提供微信支付退款的创建、查询等功能。
@@ -74,28 +81,50 @@ pub struct RefundResponse {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::services::RefundService;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let service = RefundService::new(config, http_client, signer);
-///
-/// let request = RefundRequest {
-///     transaction_id: Some("1217752501201407033233368018".to_string()),
-///     out_trade_no: None,
-///     out_refund_no: "1217752501201407033233368018".to_string(),
-///     reason: Some("商品已售完".to_string()),
-///     amount: RefundAmount {
-///         refund: 100,
-///         total: 100,
-///         currency: "CNY".to_string(),
-///     },
-///     notify_url: None,
+/// use wxpay_rs::{
+///     auth::{Signer, Sha256RsaSigner},
+///     config::WxPayConfig,
+///     http::ReqwestHttpClient,
+///     services::RefundService,
 /// };
 ///
-/// let response = tokio::runtime::Runtime::new()?.block_on(service.create_refund(&request))?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///     let http_client = Arc::new(ReqwestHttpClient::builder().build()?);
+///     let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
+///         "1900000109",
+///         b"PRIVATE KEY",
+///         "CERT123456",
+///     )?);
+///     let service = RefundService::new(Arc::new(config), http_client, signer);
+///
+///     let request = wxpay_rs::services::refund::RefundRequest {
+///         transaction_id: Some("1217752501201407033233368018".to_string()),
+///         out_trade_no: None,
+///         out_refund_no: "1217752501201407033233368018".to_string(),
+///         reason: Some("商品已售完".to_string()),
+///         amount: wxpay_rs::services::refund::RefundAmount {
+///             refund: 100,
+///             total: 100,
+///             currency: "CNY".to_string(),
+///         },
+///         notify_url: None,
+///     };
+///     let response = service.create_refund(&request).await?;
+///     let _ = response;
+///     Ok(())
+/// }
 /// ```
+#[allow(dead_code)]
 pub struct RefundService {
     /// 配置
     config: Arc<WxPayConfig>,
@@ -105,6 +134,9 @@ pub struct RefundService {
 
     /// 签名器
     signer: Arc<dyn Signer>,
+
+    /// 统一请求执行器
+    transport: ServiceTransport,
 }
 
 impl RefundService {
@@ -114,102 +146,68 @@ impl RefundService {
         http_client: Arc<dyn HttpClient>,
         signer: Arc<dyn Signer>,
     ) -> Self {
+        Self::new_with_observer(config.clone(), http_client.clone(), signer.clone(), None)
+    }
+
+    pub fn new_with_observer(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport_observer: Option<Arc<dyn TransportObserver>>,
+    ) -> Self {
         Self {
-            config,
-            http_client,
-            signer,
+            config: config.clone(),
+            http_client: http_client.clone(),
+            signer: signer.clone(),
+            transport: ServiceTransport::new_with_observer(
+                config,
+                http_client,
+                signer,
+                transport_observer,
+            ),
         }
     }
 
     /// 创建退款
     pub async fn create_refund(&self, request: &RefundRequest) -> WxPayResult<RefundResponse> {
-        let url = format!("{}/v3/refund/domestic/refunds", self.config.base_url());
-
-        // 序列化请求体
         let body = serde_json::to_string(request)?;
 
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
-        let message = format!("POST\n/v3/refund/domestic/refunds\n{}\n{}\n{}\n", timestamp, nonce, body);
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/refund/domestic/refunds",
+                Some(&body),
+                "refund.create_refund",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
-
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
-
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.post(&url, headers, &body).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let refund_response: RefundResponse = serde_json::from_str(&response.body)?;
-
-        Ok(refund_response)
+    /// 申请退款（文档风格）
+    pub async fn create(&self, request: &RefundRequest) -> WxPayResult<RefundResponse> {
+        self.create_refund(request).await
     }
 
     /// 查询退款
     pub async fn query_refund(&self, out_refund_no: &str) -> WxPayResult<RefundResponse> {
-        let url = format!(
-            "{}/v3/refund/domestic/refunds/{}",
-            self.config.base_url(),
-            out_refund_no
-        );
-
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
         let path = format!("/v3/refund/domestic/refunds/{}", out_refund_no);
-        let message = format!("GET\n{}\n{}\n{}\n\n", path, timestamp, nonce);
+        self.transport
+            .request(
+                HttpMethod::Get,
+                &path,
+                None,
+                "refund.query_refund",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+    /// 查询退款（文档风格）
+    pub async fn query(&self, request: &QueryRefundRequest) -> WxPayResult<RefundResponse> {
+        self.query_refund(&request.out_refund_no).await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
-
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.get(&url, headers).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let refund_response: RefundResponse = serde_json::from_str(&response.body)?;
-
-        Ok(refund_response)
+    /// 按商户退款单号查询（兼容 `wechatpay-go` 风格）
+    pub async fn query_by_out_refund_no(&self, out_refund_no: &str) -> WxPayResult<RefundResponse> {
+        self.query_refund(out_refund_no).await
     }
 }
 

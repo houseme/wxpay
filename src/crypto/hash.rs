@@ -27,7 +27,7 @@ pub fn sha256_base64(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     let hash = hasher.finalize();
-    base64::engine::general_purpose::STANDARD.encode(&hash)
+    base64::engine::general_purpose::STANDARD.encode(hash)
 }
 
 /// 计算 SHA256 哈希（返回字节）
@@ -79,7 +79,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     let hash = hasher.finalize();
-    hex::encode(&hash)
+    hex::encode(hash)
 }
 
 /// 计算 HMAC-SHA256
@@ -102,13 +102,13 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// assert!(!mac.is_empty());
 /// ```
 pub fn hmac_sha256_base64(key: &[u8], data: &[u8]) -> String {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, Mac, KeyInit};
     type HmacSha256 = Hmac<Sha256>;
 
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC 可以接受任意长度的密钥");
     mac.update(data);
     let result = mac.finalize();
-    base64::engine::general_purpose::STANDARD.encode(&result.into_bytes())
+    base64::engine::general_purpose::STANDARD.encode(result.into_bytes())
 }
 
 /// 计算 HMAC-SHA256（返回字节）
@@ -131,7 +131,7 @@ pub fn hmac_sha256_base64(key: &[u8], data: &[u8]) -> String {
 /// assert_eq!(mac.len(), 32);
 /// ```
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, Mac, KeyInit};
     type HmacSha256 = Hmac<Sha256>;
 
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC 可以接受任意长度的密钥");

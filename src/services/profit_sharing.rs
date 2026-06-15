@@ -5,10 +5,11 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{WxPayError, WxPayResult};
-use crate::http::HttpClient;
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
+use crate::error::WxPayResult;
+use crate::http::{HttpClient, HttpMethod};
+use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 分账请求
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +25,16 @@ pub struct ProfitSharingRequest {
 
     /// 分账说明
     pub description: String,
+}
+
+/// 查询分账结果请求
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryProfitSharingRequest {
+    /// 微信支付订单号
+    pub transaction_id: String,
+
+    /// 商户分账单号
+    pub out_order_no: String,
 }
 
 /// 分账接收方
@@ -46,6 +57,62 @@ pub struct Receiver {
     pub name: Option<String>,
 }
 
+/// 添加分账接收方请求
+#[derive(Debug, Clone, Serialize)]
+pub struct AddProfitSharingReceiverRequest {
+    /// 子商户号（服务商模式可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_mchid: Option<String>,
+
+    /// 应用 ID
+    pub appid: String,
+
+    /// 子商户应用 ID（服务商模式可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_appid: Option<String>,
+
+    /// 接收方类型
+    #[serde(rename = "type")]
+    pub receiver_type: String,
+
+    /// 接收方账号
+    pub account: String,
+
+    /// 接收方名称（个人收款方时必填）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// 与分账方的关系类型
+    #[serde(rename = "relation_type")]
+    pub relation_type: String,
+
+    /// 自定义关系（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_relation: Option<String>,
+}
+
+/// 删除分账接收方请求
+#[derive(Debug, Clone, Serialize)]
+pub struct DeleteProfitSharingReceiverRequest {
+    /// 应用 ID
+    pub appid: String,
+
+    /// 接收方类型
+    #[serde(rename = "type")]
+    pub receiver_type: String,
+
+    /// 接收方账号
+    pub account: String,
+
+    /// 子商户号（服务商模式可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_mchid: Option<String>,
+
+    /// 子商户应用 ID（服务商模式可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_appid: Option<String>,
+}
+
 /// 分账响应
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProfitSharingResponse {
@@ -60,6 +127,36 @@ pub struct ProfitSharingResponse {
 
     /// 分账单状态
     pub status: String,
+}
+
+/// 分账接收方响应（添加/删除）
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfitSharingReceiverResponse {
+    /// 子商户号（服务商模式返回）
+    pub sub_mchid: Option<String>,
+
+    /// 应用 ID
+    pub appid: Option<String>,
+
+    /// 子商户应用 ID（服务商模式返回）
+    pub sub_appid: Option<String>,
+
+    /// 接收方类型
+    #[serde(rename = "type")]
+    pub receiver_type: Option<String>,
+
+    /// 接收方账号
+    pub account: Option<String>,
+
+    /// 接收方姓名
+    pub name: Option<String>,
+
+    /// 与分账方的关系类型
+    #[serde(rename = "relation_type")]
+    pub relation_type: Option<String>,
+
+    /// 自定义关系
+    pub custom_relation: Option<String>,
 }
 
 /// 分账完结请求
@@ -98,28 +195,50 @@ pub struct ProfitSharingFinishResponse {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::services::ProfitSharingService;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let service = ProfitSharingService::new(config, http_client, signer);
-///
-/// let request = ProfitSharingRequest {
-///     transaction_id: "1217752501201407033233368018".to_string(),
-///     out_order_no: "P20150806125346".to_string(),
-///     receivers: vec![Receiver {
-///         receiver_type: "MERCHANT_ID".to_string(),
-///         account: "1900000109".to_string(),
-///         amount: 100,
-///         description: "分账".to_string(),
-///         name: None,
-///     }],
-///     description: "分账".to_string(),
+/// use wxpay_rs::{
+///     auth::{Signer, Sha256RsaSigner},
+///     config::WxPayConfig,
+///     http::ReqwestHttpClient,
+///     services::ProfitSharingService,
 /// };
 ///
-/// let response = tokio::runtime::Runtime::new()?.block_on(service.create_profit_sharing(&request))?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///     let http_client = Arc::new(ReqwestHttpClient::builder().build()?);
+///     let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
+///         "1900000109",
+///         b"PRIVATE KEY",
+///         "CERT123456",
+///     )?);
+///     let service = ProfitSharingService::new(Arc::new(config), http_client, signer);
+///
+///     let request = wxpay_rs::services::ProfitSharingRequest {
+///         transaction_id: "1217752501201407033233368018".to_string(),
+///         out_order_no: "P20150806125346".to_string(),
+///         receivers: vec![wxpay_rs::services::Receiver {
+///             receiver_type: "MERCHANT_ID".to_string(),
+///             account: "1900000109".to_string(),
+///             amount: 100,
+///             description: "分账".to_string(),
+///             name: None,
+///         }],
+///         description: "分账".to_string(),
+///     };
+///     let response = service.create_profit_sharing(&request).await?;
+///     let _ = response;
+///     Ok(())
+/// }
 /// ```
+#[allow(dead_code)]
 pub struct ProfitSharingService {
     /// 配置
     config: Arc<WxPayConfig>,
@@ -129,6 +248,9 @@ pub struct ProfitSharingService {
 
     /// 签名器
     signer: Arc<dyn Signer>,
+
+    /// 统一请求执行器
+    transport: ServiceTransport,
 }
 
 impl ProfitSharingService {
@@ -138,10 +260,25 @@ impl ProfitSharingService {
         http_client: Arc<dyn HttpClient>,
         signer: Arc<dyn Signer>,
     ) -> Self {
+        Self::new_with_observer(config.clone(), http_client.clone(), signer.clone(), None)
+    }
+
+    pub fn new_with_observer(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport_observer: Option<Arc<dyn TransportObserver>>,
+    ) -> Self {
         Self {
-            config,
-            http_client,
-            signer,
+            config: config.clone(),
+            http_client: http_client.clone(),
+            signer: signer.clone(),
+            transport: ServiceTransport::new_with_observer(
+                config,
+                http_client,
+                signer,
+                transport_observer,
+            ),
         }
     }
 
@@ -150,47 +287,60 @@ impl ProfitSharingService {
         &self,
         request: &ProfitSharingRequest,
     ) -> WxPayResult<ProfitSharingResponse> {
-        let url = format!("{}/v3/profitsharing/orders", self.config.base_url());
-
-        // 序列化请求体
         let body = serde_json::to_string(request)?;
 
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
-        let message = format!("POST\n/v3/profitsharing/orders\n{}\n{}\n{}\n", timestamp, nonce, body);
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/profitsharing/orders",
+                Some(&body),
+                "profit_sharing.create_profit_sharing",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+    /// 创建分账（文档风格）
+    pub async fn create(&self, request: &ProfitSharingRequest) -> WxPayResult<ProfitSharingResponse> {
+        self.create_profit_sharing(request).await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
+    /// 创建分账单（兼容 `wechatpay-go` 风格）
+    pub async fn create_order(&self, request: &ProfitSharingRequest) -> WxPayResult<ProfitSharingResponse> {
+        self.create_profit_sharing(request).await
+    }
 
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
+    /// 添加分账接收方
+    pub async fn add_receiver(
+        &self,
+        request: &AddProfitSharingReceiverRequest,
+    ) -> WxPayResult<ProfitSharingReceiverResponse> {
+        let body = serde_json::to_string(request)?;
 
-        // 发送请求
-        let response = self.http_client.post(&url, headers, &body).await?;
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/profitsharing/receivers/add",
+                Some(&body),
+                "profit_sharing.add_receiver",
+            )
+            .await
+    }
 
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
+    /// 删除分账接收方
+    pub async fn delete_receiver(
+        &self,
+        request: &DeleteProfitSharingReceiverRequest,
+    ) -> WxPayResult<ProfitSharingReceiverResponse> {
+        let body = serde_json::to_string(request)?;
 
-        // 解析响应
-        let profit_sharing_response: ProfitSharingResponse = serde_json::from_str(&response.body)?;
-
-        Ok(profit_sharing_response)
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/profitsharing/receivers/delete",
+                Some(&body),
+                "profit_sharing.delete_receiver",
+            )
+            .await
     }
 
     /// 查询分账
@@ -199,52 +349,32 @@ impl ProfitSharingService {
         transaction_id: &str,
         out_order_no: &str,
     ) -> WxPayResult<ProfitSharingResponse> {
-        let url = format!(
-            "{}/v3/profitsharing/orders/{}?transaction_id={}",
-            self.config.base_url(),
-            out_order_no,
-            transaction_id
-        );
-
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
         let path = format!(
             "/v3/profitsharing/orders/{}?transaction_id={}",
             out_order_no, transaction_id
         );
-        let message = format!("GET\n{}\n{}\n{}\n\n", path, timestamp, nonce);
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+        self.transport
+            .request(HttpMethod::Get, &path, None, "profit_sharing.query_profit_sharing")
+            .await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
+    /// 查询分账（文档风格）
+    pub async fn query(
+        &self,
+        request: &QueryProfitSharingRequest,
+    ) -> WxPayResult<ProfitSharingResponse> {
+        self.query_profit_sharing(&request.transaction_id, &request.out_order_no)
+            .await
+    }
 
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.get(&url, headers).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let profit_sharing_response: ProfitSharingResponse = serde_json::from_str(&response.body)?;
-
-        Ok(profit_sharing_response)
+    /// 查询分账单（兼容 `wechatpay-go` 风格）
+    pub async fn query_order(
+        &self,
+        request: &QueryProfitSharingRequest,
+    ) -> WxPayResult<ProfitSharingResponse> {
+        self.query_profit_sharing(&request.transaction_id, &request.out_order_no)
+            .await
     }
 
     /// 完成分账
@@ -252,47 +382,29 @@ impl ProfitSharingService {
         &self,
         request: &ProfitSharingFinishRequest,
     ) -> WxPayResult<ProfitSharingFinishResponse> {
-        let url = format!("{}/v3/profitsharing/finish", self.config.base_url());
-
-        // 序列化请求体
         let body = serde_json::to_string(request)?;
 
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
-        let message = format!("POST\n/v3/profitsharing/finish\n{}\n{}\n{}\n", timestamp, nonce, body);
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/profitsharing/finish",
+                Some(&body),
+                "profit_sharing.finish_profit_sharing",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+    /// 完成分账（文档风格）
+    pub async fn finish(&self, request: &ProfitSharingFinishRequest) -> WxPayResult<ProfitSharingFinishResponse> {
+        self.finish_profit_sharing(request).await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
-
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.post(&url, headers, &body).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let finish_response: ProfitSharingFinishResponse = serde_json::from_str(&response.body)?;
-
-        Ok(finish_response)
+    /// 完成分账单（兼容 `wechatpay-go` 风格）
+    pub async fn finish_order(
+        &self,
+        request: &ProfitSharingFinishRequest,
+    ) -> WxPayResult<ProfitSharingFinishResponse> {
+        self.finish_profit_sharing(request).await
     }
 }
 

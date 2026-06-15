@@ -4,11 +4,13 @@
 
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::{WxPayError, WxPayResult};
-use crate::http::HttpClient;
+use crate::http::{HttpClient, HttpMethod};
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
+use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 证书信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,15 +32,38 @@ pub struct CertificateInfo {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::services::CertificateService;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let service = CertificateService::new(config, http_client, signer);
+/// use wxpay_rs::{
+///     auth::{Signer, Sha256RsaSigner},
+///     config::WxPayConfig,
+///     http::ReqwestHttpClient,
+///     services::CertificateService,
+/// };
 ///
-/// let certificates = tokio::runtime::Runtime::new()?.block_on(service.get_certificates())?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///     let http_client = Arc::new(ReqwestHttpClient::builder().build()?);
+///     let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
+///         "1900000109",
+///         b"PRIVATE KEY",
+///         "CERT123456",
+///     )?);
+///
+///     let service = CertificateService::new(Arc::new(config), http_client, signer);
+///     let certificates = service.get_certificates().await?;
+///     let _ = certificates;
+///     Ok(())
+/// }
 /// ```
+#[allow(dead_code)]
 pub struct CertificateService {
     /// 配置
     config: Arc<WxPayConfig>,
@@ -48,6 +73,9 @@ pub struct CertificateService {
 
     /// 签名器
     signer: Arc<dyn Signer>,
+
+    /// 统一请求执行器
+    transport: ServiceTransport,
 }
 
 impl CertificateService {
@@ -57,50 +85,50 @@ impl CertificateService {
         http_client: Arc<dyn HttpClient>,
         signer: Arc<dyn Signer>,
     ) -> Self {
+        Self::new_with_observer(config.clone(), http_client.clone(), signer.clone(), None)
+    }
+
+    pub fn new_with_observer(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport_observer: Option<Arc<dyn TransportObserver>>,
+    ) -> Self {
         Self {
-            config,
-            http_client,
-            signer,
+            config: config.clone(),
+            http_client: http_client.clone(),
+            signer: signer.clone(),
+            transport: ServiceTransport::new_with_observer(
+                config,
+                http_client,
+                signer,
+                transport_observer,
+            ),
         }
     }
 
     /// 获取证书列表
     pub async fn get_certificates(&self) -> WxPayResult<Vec<CertificateInfo>> {
-        let url = format!("{}/v3/certificates", self.config.base_url());
+        let response_json: Value = self
+            .transport
+            .request(HttpMethod::Get, "/v3/certificates", None, "certificate.get_certificates")
+            .await?;
 
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
-        let message = format!("GET\n/v3/certificates\n{}\n{}\n\n", timestamp, nonce);
+        let certificate_items = response_json
+            .get("data")
+            .and_then(|v| v.as_array())
+            .or_else(|| response_json.as_array())
+            .ok_or_else(|| {
+                WxPayError::CertificateParseError("证书接口响应缺少 data 字段".to_string())
+            })?;
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+        let mut certificates = Vec::with_capacity(certificate_items.len());
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
-
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.get(&url, headers).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
+        for item in certificate_items {
+            let info: CertificateInfo = serde_json::from_value(item.clone())
+                .map_err(|e| WxPayError::CertificateParseError(format!("证书信息解析失败：{}", e)))?;
+            certificates.push(info);
         }
-
-        // 解析响应
-        let certificates: Vec<CertificateInfo> = serde_json::from_str(&response.body)?;
 
         Ok(certificates)
     }

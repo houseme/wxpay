@@ -41,9 +41,10 @@ pub trait Signer: Send + Sync {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::auth::Sha256RsaSigner;
+/// use wxpay_rs::auth::{Signer, Sha256RsaSigner};
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let private_key_pem = std::fs::read_to_string("path/to/private_key.pem")?;
 /// let signer = Sha256RsaSigner::new(
 ///     "1900000109",
@@ -51,7 +52,7 @@ pub trait Signer: Send + Sync {
 ///     "CERT123456",
 /// )?;
 ///
-/// let signature = tokio::runtime::Runtime::new()?.block_on(signer.sign("test message"))?;
+/// let signature = signer.sign("test message").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -178,13 +179,6 @@ impl std::fmt::Debug for Sha256RsaSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // 测试用的 PKCS#8 私钥（仅用于测试，不是真实密钥）
-    const TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKB
-wUIiN+3WGrCCZLomSjHzLMNOmNQ4sM/2zRnB+jTVJDJXbNGQPVUBQGY1T5RkxEVp
-S7sFnAPBKXCIIw==（此处省略完整密钥）
------END PRIVATE KEY-----"#;
 
     #[test]
     fn test_build_sign_message() {

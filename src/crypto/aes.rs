@@ -8,6 +8,8 @@ use aes_gcm::{
 };
 use sha2::{Sha256, Digest};
 use base64::Engine;
+use rand::RngExt;
+use std::convert::TryFrom;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -100,16 +102,18 @@ impl Aes256GcmCipher {
     /// 返回 (nonce, ciphertext) 元组，都是 Base64 编码的字符串
     pub fn encrypt(&self, plaintext: &str) -> WxPayResult<(String, String)> {
         // 生成随机 nonce（12 字节）
-        let mut rng = rand::thread_rng();
-        let nonce = Aes256Gcm::generate_nonce(&mut rng);
+        let mut rng = rand::rng();
+        let mut nonce_bytes = [0_u8; 12];
+        rng.fill(&mut nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = self
             .cipher
             .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|e| WxPayError::EncryptionError(format!("AES-256-GCM 加密失败：{}", e)))?;
 
-        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&nonce);
-        let ciphertext_b64 = base64::engine::general_purpose::STANDARD.encode(&ciphertext);
+        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(nonce);
+        let ciphertext_b64 = base64::engine::general_purpose::STANDARD.encode(ciphertext);
 
         Ok((nonce_b64, ciphertext_b64))
     }
@@ -131,11 +135,13 @@ impl Aes256GcmCipher {
             ));
         }
 
-        let nonce = Nonce::from_slice(nonce);
+        let nonce_bytes: [u8; 12] = <[u8; 12]>::try_from(nonce)
+            .map_err(|_| WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string()))?;
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = self
             .cipher
-            .encrypt(nonce, plaintext.as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|e| WxPayError::EncryptionError(format!("AES-256-GCM 加密失败：{}", e)))?;
 
         Ok(base64::engine::general_purpose::STANDARD.encode(&ciphertext))
@@ -160,11 +166,17 @@ impl Aes256GcmCipher {
             .decode(ciphertext)
             .map_err(|e| WxPayError::InvalidCiphertext(format!("密文 Base64 解码失败：{}", e)))?;
 
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = {
+            let nonce: [u8; 12] = nonce_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string()))?;
+            Nonce::from(nonce)
+        };
 
         let plaintext = self
             .cipher
-            .decrypt(nonce, ciphertext_bytes.as_ref())
+            .decrypt(&nonce, ciphertext_bytes.as_ref())
             .map_err(|e| WxPayError::DecryptionError(format!("AES-256-GCM 解密失败：{}", e)))?;
 
         String::from_utf8(plaintext).map_err(|e| {
@@ -202,12 +214,17 @@ impl Aes256GcmCipher {
             .decode(ciphertext)
             .map_err(|e| WxPayError::InvalidCiphertext(format!("密文 Base64 解码失败：{}", e)))?;
 
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = {
+            let nonce: [u8; 12] = nonce_bytes
+                .try_into()
+                .map_err(|_| WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string()))?;
+            Nonce::from(nonce)
+        };
 
         // 使用 associated_data 作为附加认证数据
         let plaintext = self
             .cipher
-            .decrypt(nonce, aes_gcm::aead::Payload {
+            .decrypt(&nonce, aes_gcm::aead::Payload {
                 msg: &ciphertext_bytes,
                 aad: associated_data.as_bytes(),
             })
@@ -276,9 +293,24 @@ mod tests {
         let plaintext = r#"{"out_trade_no":"123456789"}"#;
         let associated_data = "notification";
         let nonce = "testnonce123";
+        let nonce_bytes: [u8; 12] = nonce
+            .as_bytes()
+            .try_into()
+            .expect("nonce length should be 12");
+        let nonce_value = Nonce::from(nonce_bytes);
 
-        // 先加密
-        let ciphertext = cipher.encrypt_with_nonce(plaintext, nonce.as_bytes()).unwrap();
+        let ciphertext = base64::engine::general_purpose::STANDARD.encode(
+            cipher
+                .cipher
+                .encrypt(
+                    &nonce_value,
+                    aes_gcm::aead::Payload {
+                        msg: plaintext.as_bytes(),
+                        aad: associated_data.as_bytes(),
+                    },
+                )
+                .expect("encrypt notification payload failed"),
+        );
 
         // 解密通知
         let decrypted = cipher.decrypt_notification(nonce, &ciphertext, associated_data).unwrap();

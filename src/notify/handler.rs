@@ -157,15 +157,28 @@ pub struct RefundNotifyAmount {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::notify::NotifyHandler;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let handler = NotifyHandler::new(config, verifier);
+/// use wxpay_rs::{
+///     auth::{Sha256RsaVerifier, Verifier},
+///     config::NotifyConfig,
+///     notify::NotifyHandler,
+/// };
 ///
-/// let notify_request: NotifyRequest = serde_json::from_str(body)?;
-/// let payment_data = handler.handle_payment_notify(&notify_request)?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = NotifyConfig {
+///         api_v3_key: "abcdefghijklmnopqrstuvwxyz123456".to_string(),
+///         cert_serial_number: "CERT123456".to_string(),
+///         platform_certificate: vec![],
+///     };
+///     let verifier = Sha256RsaVerifier::new(vec![b"dummy certificate".to_vec()])?;
+///     let verifier: Arc<dyn Verifier> = Arc::new(verifier);
+///     let handler = NotifyHandler::new(config, verifier)?;
+///
+///     let _ = handler;
+///     Ok(())
+/// }
 /// ```
 pub struct NotifyHandler {
     /// 通知配置

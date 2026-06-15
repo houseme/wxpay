@@ -3,14 +3,14 @@
 //! 定义了微信支付 SDK 的配置结构体和构建器。
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::error::{WxPayError, WxPayResult};
 
 /// 微信支付 API 环境
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Environment {
     /// 正式环境
+    #[default]
     Production,
     /// 沙箱环境
     Sandbox,
@@ -23,12 +23,6 @@ impl Environment {
             Self::Production => "https://api.mch.weixin.qq.com",
             Self::Sandbox => "https://api.mch.weixin.qq.com",
         }
-    }
-}
-
-impl Default for Environment {
-    fn default() -> Self {
-        Self::Production
     }
 }
 

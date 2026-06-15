@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::WxPayConfig;
-use crate::error::WxPayResult;
 
 /// 微信支付凭证
 ///

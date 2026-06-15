@@ -9,6 +9,7 @@ use rsa::pkcs8::DecodePublicKey;
 use rsa::{RsaPrivateKey, RsaPublicKey, Oaep, Pkcs1v15Encrypt};
 use sha2::Sha256;
 use base64::Engine;
+use der::Encode;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -53,8 +54,12 @@ impl RsaOaepCipher {
             WxPayError::CertificateParseError(format!("证书解析失败：{}", e))
         })?;
 
-        let spki = &cert.tbs_certificate.subject_public_key_info;
-        let public_key = RsaPublicKey::try_from(spki.clone()).map_err(|e| {
+        let spki = cert.tbs_certificate().subject_public_key_info();
+        let spki_der = spki.to_der().map_err(|e| {
+            WxPayError::CertificateParseError(format!("提取证书 SPKI 失败：{}", e))
+        })?;
+
+        let public_key = RsaPublicKey::from_public_key_der(&spki_der).map_err(|e| {
             WxPayError::CertificateParseError(format!("提取公钥失败：{}", e))
         })?;
 
@@ -100,8 +105,8 @@ impl RsaOaepCipher {
     ///
     /// 返回 Base64 编码的密文
     pub fn encrypt(&self, plaintext: &str) -> WxPayResult<String> {
-        let mut rng = rand::thread_rng();
-        let padding = Oaep::new::<Sha256>();
+        let mut rng = rand::rng();
+        let padding = Oaep::<Sha256>::new();
 
         let ciphertext = self
             .public_key
@@ -121,7 +126,7 @@ impl RsaOaepCipher {
     ///
     /// 返回 Base64 编码的密文
     pub fn encrypt_pkcs1v15(&self, plaintext: &str) -> WxPayResult<String> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let ciphertext = self
             .public_key
@@ -205,7 +210,7 @@ impl RsaOaepDecrypter {
             .decode(ciphertext)
             .map_err(|e| WxPayError::InvalidCiphertext(format!("Base64 解码失败：{}", e)))?;
 
-        let padding = Oaep::new::<Sha256>();
+        let padding = Oaep::<Sha256>::new();
 
         let plaintext = self
             .private_key
@@ -251,11 +256,14 @@ impl std::fmt::Debug for RsaOaepDecrypter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsa::RsaPrivateKey;
-    use rand::rngs::OsRng;
+    use pkcs8::EncodePrivateKey;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+    use rsa::{RsaPrivateKey, RsaPublicKey};
+    use spki::EncodePublicKey;
 
     fn generate_test_keypair() -> (Vec<u8>, Vec<u8>) {
-        let mut rng = OsRng;
+        let mut rng = StdRng::seed_from_u64(42);
         let bits = 2048;
         let private_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate key");
         let public_key = RsaPublicKey::from(&private_key);
