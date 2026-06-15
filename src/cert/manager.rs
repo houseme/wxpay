@@ -66,9 +66,8 @@ impl CertManager {
     ) -> WxPayResult<()> {
         use der::Decode;
 
-        let cert = Certificate::from_der(&cert_der).map_err(|e| {
-            WxPayError::CertificateParseError(format!("证书解析失败：{}", e))
-        })?;
+        let cert = Certificate::from_der(&cert_der)
+            .map_err(|e| WxPayError::CertificateParseError(format!("证书解析失败：{}", e)))?;
 
         let mut certificates = self.certificates.write().await;
         let mut cert_data = self.cert_data.write().await;

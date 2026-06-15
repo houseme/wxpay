@@ -44,9 +44,8 @@ impl NotifyParser {
     ///
     /// 返回解析后的通知请求
     pub fn parse(body: &str) -> WxPayResult<NotifyRequest> {
-        serde_json::from_str(body).map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("解析通知失败: {}", e))
-        })
+        serde_json::from_str(body)
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("解析通知失败: {}", e)))
     }
 
     /// 解析通知请求（从字节）
@@ -59,9 +58,8 @@ impl NotifyParser {
     ///
     /// 返回解析后的通知请求
     pub fn parse_bytes(bytes: &[u8]) -> WxPayResult<NotifyRequest> {
-        serde_json::from_slice(bytes).map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("解析通知失败: {}", e))
-        })
+        serde_json::from_slice(bytes)
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("解析通知失败: {}", e)))
     }
 
     /// 获取通知类型
@@ -80,9 +78,8 @@ impl NotifyParser {
             notify_type: String,
         }
 
-        let notify: NotifyType = serde_json::from_str(body).map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("解析通知类型失败: {}", e))
-        })?;
+        let notify: NotifyType = serde_json::from_str(body)
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("解析通知类型失败: {}", e)))?;
 
         Ok(notify.notify_type)
     }
@@ -102,9 +99,8 @@ impl NotifyParser {
             id: String,
         }
 
-        let notify: NotifyId = serde_json::from_str(body).map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("解析通知 ID 失败: {}", e))
-        })?;
+        let notify: NotifyId = serde_json::from_str(body)
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("解析通知 ID 失败: {}", e)))?;
 
         Ok(notify.id)
     }
@@ -148,9 +144,7 @@ impl NotifyParser {
         }
 
         if notify.resource.ciphertext.is_empty() {
-            return Err(WxPayError::InvalidNotifyFormat(
-                "密文不能为空".to_string(),
-            ));
+            return Err(WxPayError::InvalidNotifyFormat("密文不能为空".to_string()));
         }
 
         if notify.resource.nonce.is_empty() {

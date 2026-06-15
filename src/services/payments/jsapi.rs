@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付 JSAPI 支付功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;

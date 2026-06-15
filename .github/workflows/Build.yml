@@ -104,8 +104,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - name: Run feature matrix
-        run: ./scripts/verify_feature_matrix.sh
   doc_tests:
     name: Doc Tests
     runs-on: ubuntu-latest

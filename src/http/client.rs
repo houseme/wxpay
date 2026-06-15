@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rand::{rng, RngExt};
+use rand::{RngExt, rng};
 use reqwest::Client;
 use tokio::time::sleep;
 
@@ -36,11 +36,7 @@ pub trait HttpClient: Send + Sync {
     ) -> WxPayResult<HttpResponse>;
 
     /// 发送 DELETE 请求
-    async fn delete(
-        &self,
-        url: &str,
-        headers: Vec<(String, String)>,
-    ) -> WxPayResult<HttpResponse>;
+    async fn delete(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse>;
 
     /// 发送 PATCH 请求
     async fn patch(
@@ -186,7 +182,10 @@ impl ReqwestHttpClient {
         Err(WxPayError::Timeout)
     }
 
-    fn append_headers(request: reqwest::RequestBuilder, headers: &[(String, String)]) -> reqwest::RequestBuilder {
+    fn append_headers(
+        request: reqwest::RequestBuilder,
+        headers: &[(String, String)],
+    ) -> reqwest::RequestBuilder {
         let mut request = request;
 
         for (name, value) in headers {
@@ -266,10 +265,13 @@ impl Default for ReqwestHttpClientBuilder {
 #[async_trait]
 impl HttpClient for ReqwestHttpClient {
     async fn get(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse> {
-        self.execute_with_retries(|| {
-            let request = self.client.get(url);
-            Self::append_headers(request, &headers)
-        }, true)
+        self.execute_with_retries(
+            || {
+                let request = self.client.get(url);
+                Self::append_headers(request, &headers)
+            },
+            true,
+        )
         .await
     }
 
@@ -281,10 +283,13 @@ impl HttpClient for ReqwestHttpClient {
     ) -> WxPayResult<HttpResponse> {
         let body = body.to_string();
 
-        self.execute_with_retries(move || {
-            let request = self.client.post(url).body(body.clone());
-            Self::append_headers(request, &headers)
-        }, false)
+        self.execute_with_retries(
+            move || {
+                let request = self.client.post(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
         .await
     }
 
@@ -296,22 +301,24 @@ impl HttpClient for ReqwestHttpClient {
     ) -> WxPayResult<HttpResponse> {
         let body = body.to_string();
 
-        self.execute_with_retries(move || {
-            let request = self.client.put(url).body(body.clone());
-            Self::append_headers(request, &headers)
-        }, false)
+        self.execute_with_retries(
+            move || {
+                let request = self.client.put(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
         .await
     }
 
-    async fn delete(
-        &self,
-        url: &str,
-        headers: Vec<(String, String)>,
-    ) -> WxPayResult<HttpResponse> {
-        self.execute_with_retries(|| {
-            let request = self.client.delete(url);
-            Self::append_headers(request, &headers)
-        }, true)
+    async fn delete(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse> {
+        self.execute_with_retries(
+            || {
+                let request = self.client.delete(url);
+                Self::append_headers(request, &headers)
+            },
+            true,
+        )
         .await
     }
 
@@ -323,10 +330,13 @@ impl HttpClient for ReqwestHttpClient {
     ) -> WxPayResult<HttpResponse> {
         let body = body.to_string();
 
-        self.execute_with_retries(move || {
-            let request = self.client.patch(url).body(body.clone());
-            Self::append_headers(request, &headers)
-        }, false)
+        self.execute_with_retries(
+            move || {
+                let request = self.client.patch(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
         .await
     }
 }
@@ -354,18 +364,17 @@ mod tests {
 
         assert!(response.is_success());
         assert_eq!(response.status, 200);
-        assert_eq!(response.get_header("Content-Type"), Some("application/json"));
+        assert_eq!(
+            response.get_header("Content-Type"),
+            Some("application/json")
+        );
         assert_eq!(response.get_header("X-Request-Id"), Some("12345"));
         assert_eq!(response.get_header("Non-Existent"), None);
     }
 
     #[test]
     fn test_http_response_not_success() {
-        let response = HttpResponse::new(
-            400,
-            vec![],
-            r#"{"code":"PARAM_ERROR"}"#.to_string(),
-        );
+        let response = HttpResponse::new(400, vec![], r#"{"code":"PARAM_ERROR"}"#.to_string());
 
         assert!(!response.is_success());
     }

@@ -31,7 +31,7 @@
 //!     // 使用 JSAPI 服务
 //!     let jsapi = client.jsapi();
 //!     let _ = jsapi;
-//! 
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -50,21 +50,21 @@
 //! - [`error`] - 错误类型模块
 
 // 声明模块
-pub mod error;
-pub mod config;
-pub mod utils;
 pub mod auth;
-pub mod crypto;
-pub mod http;
 pub mod cert;
-pub mod services;
-pub mod notify;
 pub mod client;
+pub mod config;
+pub mod crypto;
+pub mod error;
+pub mod http;
+pub mod notify;
+pub mod services;
+pub mod utils;
 
 // 重导出常用类型
-pub use config::{WxPayConfig, WxPayConfigBuilder, Environment, NotifyConfig, NotifyConfigBuilder};
-pub use error::{WxPayError, WxPayResult};
 pub use client::{WxPayClient, WxPayClientBuilder};
+pub use config::{Environment, NotifyConfig, NotifyConfigBuilder, WxPayConfig, WxPayConfigBuilder};
+pub use error::{WxPayError, WxPayResult};
 pub use services::transport::{TransportEvent, TransportObserver};
 
 // 条件编译：文档特性

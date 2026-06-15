@@ -3,11 +3,11 @@
 //! 提供请求签名功能，使用 SHA256-RSA 算法。
 
 use async_trait::async_trait;
+use base64::Engine;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
-use rsa::{RsaPrivateKey, Pkcs1v15Sign};
-use sha2::{Sha256, Digest};
-use base64::Engine;
+use rsa::{Pkcs1v15Sign, RsaPrivateKey};
+use sha2::{Digest, Sha256};
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -149,10 +149,10 @@ impl Signer for Sha256RsaSigner {
         let hash = hasher.finalize();
 
         // 使用 RSA PKCS1v15 签名
-        let signature = self.private_key.sign(
-            Pkcs1v15Sign::new::<Sha256>(),
-            &hash,
-        ).map_err(|e| WxPayError::SignError(format!("RSA 签名失败: {}", e)))?;
+        let signature = self
+            .private_key
+            .sign(Pkcs1v15Sign::new::<Sha256>(), &hash)
+            .map_err(|e| WxPayError::SignError(format!("RSA 签名失败: {}", e)))?;
 
         // Base64 编码
         Ok(base64::engine::general_purpose::STANDARD.encode(&signature))

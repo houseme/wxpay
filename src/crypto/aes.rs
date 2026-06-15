@@ -3,12 +3,12 @@
 //! 提供 AES-256-GCM 加密和解密功能，用于通知数据的加解密。
 
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
-use sha2::{Sha256, Digest};
 use base64::Engine;
 use rand::RngExt;
+use sha2::{Digest, Sha256};
 use std::convert::TryFrom;
 
 use crate::error::{WxPayError, WxPayResult};
@@ -61,9 +61,8 @@ impl Aes256GcmCipher {
         hasher.update(api_v3_key.as_bytes());
         let key = hasher.finalize();
 
-        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
-            WxPayError::InvalidKey(format!("创建 AES 密钥失败：{}", e))
-        })?;
+        let cipher = Aes256Gcm::new_from_slice(&key)
+            .map_err(|e| WxPayError::InvalidKey(format!("创建 AES 密钥失败：{}", e)))?;
 
         Ok(Self { cipher })
     }
@@ -79,14 +78,11 @@ impl Aes256GcmCipher {
     /// 返回加密器实例
     pub fn from_key(key: &[u8]) -> WxPayResult<Self> {
         if key.len() != 32 {
-            return Err(WxPayError::InvalidKey(
-                "密钥必须是 32 字节".to_string(),
-            ));
+            return Err(WxPayError::InvalidKey("密钥必须是 32 字节".to_string()));
         }
 
-        let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| {
-            WxPayError::InvalidKey(format!("创建 AES 密钥失败：{}", e))
-        })?;
+        let cipher = Aes256Gcm::new_from_slice(key)
+            .map_err(|e| WxPayError::InvalidKey(format!("创建 AES 密钥失败：{}", e)))?;
 
         Ok(Self { cipher })
     }
@@ -167,10 +163,9 @@ impl Aes256GcmCipher {
             .map_err(|e| WxPayError::InvalidCiphertext(format!("密文 Base64 解码失败：{}", e)))?;
 
         let nonce = {
-            let nonce: [u8; 12] = nonce_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string()))?;
+            let nonce: [u8; 12] = nonce_bytes.as_slice().try_into().map_err(|_| {
+                WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string())
+            })?;
             Nonce::from(nonce)
         };
 
@@ -179,9 +174,8 @@ impl Aes256GcmCipher {
             .decrypt(&nonce, ciphertext_bytes.as_ref())
             .map_err(|e| WxPayError::DecryptionError(format!("AES-256-GCM 解密失败：{}", e)))?;
 
-        String::from_utf8(plaintext).map_err(|e| {
-            WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e))
-        })
+        String::from_utf8(plaintext)
+            .map_err(|e| WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e)))
     }
 
     /// 解密微信支付通知数据
@@ -215,24 +209,26 @@ impl Aes256GcmCipher {
             .map_err(|e| WxPayError::InvalidCiphertext(format!("密文 Base64 解码失败：{}", e)))?;
 
         let nonce = {
-            let nonce: [u8; 12] = nonce_bytes
-                .try_into()
-                .map_err(|_| WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string()))?;
+            let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
+                WxPayError::InvalidParameter("nonce 长度必须是 12 字节".to_string())
+            })?;
             Nonce::from(nonce)
         };
 
         // 使用 associated_data 作为附加认证数据
         let plaintext = self
             .cipher
-            .decrypt(&nonce, aes_gcm::aead::Payload {
-                msg: &ciphertext_bytes,
-                aad: associated_data.as_bytes(),
-            })
+            .decrypt(
+                &nonce,
+                aes_gcm::aead::Payload {
+                    msg: &ciphertext_bytes,
+                    aad: associated_data.as_bytes(),
+                },
+            )
             .map_err(|e| WxPayError::DecryptionError(format!("AES-256-GCM 解密失败：{}", e)))?;
 
-        String::from_utf8(plaintext).map_err(|e| {
-            WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e))
-        })
+        String::from_utf8(plaintext)
+            .map_err(|e| WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e)))
     }
 }
 
@@ -313,7 +309,9 @@ mod tests {
         );
 
         // 解密通知
-        let decrypted = cipher.decrypt_notification(nonce, &ciphertext, associated_data).unwrap();
+        let decrypted = cipher
+            .decrypt_notification(nonce, &ciphertext, associated_data)
+            .unwrap();
 
         assert_eq!(plaintext, decrypted);
     }

@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付 APP 支付功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -84,7 +84,7 @@ pub struct AppPayParams {
 ///     services::AppService,
 /// };
 /// use wxpay_rs::services::payments::jsapi::Amount;
-/// 
+///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let config = WxPayConfig::builder()

@@ -2,8 +2,8 @@
 //!
 //! 定义了 SDK 中所有可能的错误类型，使用 thiserror 进行派生。
 
-use thiserror::Error;
 use serde_json::Value;
+use thiserror::Error;
 
 /// 微信支付 SDK 结果类型别名
 pub type WxPayResult<T> = Result<T, WxPayError>;
@@ -73,9 +73,8 @@ impl WxPayErrorKind {
     pub fn from_code(code: &str) -> Self {
         match code {
             "PARAM_ERROR" | "INVALID_REQUEST" | "INVALID_PARAMETER" => Self::InvalidParameter,
-            "NO_AUTH" | "SIGN_ERROR" | "INVALID_SIGN" | "PERMISSION_DENIED" | "AUTH_ERROR" | "INVALID_CREDENTIAL" => {
-                Self::Authentication
-            }
+            "NO_AUTH" | "SIGN_ERROR" | "INVALID_SIGN" | "PERMISSION_DENIED" | "AUTH_ERROR"
+            | "INVALID_CREDENTIAL" => Self::Authentication,
             "SIGNATURE_ERROR" | "VERIFY_SIGNATURE_ERROR" => Self::Signature,
             "ORDER_NOT_EXIST" | "NOT_FOUND" | "RESOURCE_NOT_FOUND" => Self::ResourceNotFound,
             "FREQ_LIMIT" | "RATE_LIMIT" | "V2_API_DISABLED" => Self::RateLimited,
@@ -388,11 +387,14 @@ impl WxPayError {
                 WxPayErrorKind::Unknown => "unknown",
             },
             Self::NetworkError(_) | Self::Timeout => "network",
-            Self::SignatureVerificationFailed | Self::SignError(_) | Self::InvalidSignatureFormat(_) => {
-                "security.signature"
-            }
-            Self::CertificateExpired | Self::CertificateVerificationError(_) | Self::CertificateParseError(_) |
-            Self::CertificateDownloadError(_) | Self::CertificateNotFound(_) => "certificate",
+            Self::SignatureVerificationFailed
+            | Self::SignError(_)
+            | Self::InvalidSignatureFormat(_) => "security.signature",
+            Self::CertificateExpired
+            | Self::CertificateVerificationError(_)
+            | Self::CertificateParseError(_)
+            | Self::CertificateDownloadError(_)
+            | Self::CertificateNotFound(_) => "certificate",
             Self::UnexpectedStatusCode(status) if *status >= 500 => "system.internal",
             Self::UnexpectedStatusCode(status) if *status >= 400 => "business.http",
             Self::UnexpectedStatusCode(_) => "business.http",
@@ -436,7 +438,9 @@ impl WxPayError {
     pub fn is_signature_error(&self) -> bool {
         matches!(
             self,
-            Self::SignError(_) | Self::SignatureVerificationFailed | Self::InvalidSignatureFormat(_)
+            Self::SignError(_)
+                | Self::SignatureVerificationFailed
+                | Self::InvalidSignatureFormat(_)
         )
     }
 
@@ -498,7 +502,10 @@ mod tests {
         assert_eq!(err.to_string(), "配置错误：missing app_id");
 
         let err = WxPayError::api("PARAM_ERROR", "参数错误");
-        assert_eq!(err.to_string(), "API 错误：code=PARAM_ERROR, message=参数错误");
+        assert_eq!(
+            err.to_string(),
+            "API 错误：code=PARAM_ERROR, message=参数错误"
+        );
     }
 
     #[test]

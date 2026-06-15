@@ -2,13 +2,13 @@
 //!
 //! 提供处理微信支付回调通知的功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
 use crate::auth::Verifier;
-use crate::crypto::Aes256GcmCipher;
 use crate::config::NotifyConfig;
+use crate::crypto::Aes256GcmCipher;
+use crate::error::{WxPayError, WxPayResult};
 
 /// 通知请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,9 +277,9 @@ impl NotifyHandler {
 
     /// 验证通知时间戳
     pub fn verify_timestamp(&self, timestamp: &str, tolerance_seconds: i64) -> WxPayResult<bool> {
-        let timestamp: i64 = timestamp.parse().map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("无效的时间戳: {}", e))
-        })?;
+        let timestamp: i64 = timestamp
+            .parse()
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("无效的时间戳: {}", e)))?;
 
         Ok(crate::utils::timestamp::is_timestamp_valid(
             timestamp,

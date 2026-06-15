@@ -117,7 +117,10 @@ impl TransportEvent {
 
     /// 是否建议立即触发告警（用于结构化日志策略）
     pub fn should_alert(&self) -> bool {
-        matches!(self.alert_level, WxPayAlertLevel::High | WxPayAlertLevel::Critical) || self.should_retry
+        matches!(
+            self.alert_level,
+            WxPayAlertLevel::High | WxPayAlertLevel::Critical
+        ) || self.should_retry
     }
 }
 
@@ -196,7 +199,10 @@ impl ServiceTransport {
         headers.push(("Accept".to_string(), "application/json".to_string()));
         headers.push(("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()));
 
-        if matches!(method, HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch) {
+        if matches!(
+            method,
+            HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch
+        ) {
             headers.push(("Content-Type".to_string(), "application/json".to_string()));
         }
 
@@ -210,7 +216,8 @@ impl ServiceTransport {
         body: Option<&str>,
         operation: &str,
     ) -> WxPayResult<HttpResponse> {
-        let mut request = RequestBuilder::new(method, path).timestamp(crate::utils::timestamp::get_timestamp());
+        let mut request =
+            RequestBuilder::new(method, path).timestamp(crate::utils::timestamp::get_timestamp());
         if let Some(body) = body {
             request = request.body(body);
         }
@@ -222,11 +229,7 @@ impl ServiceTransport {
 
         let started_at = Instant::now();
         let response_result: WxPayResult<HttpResponse> = match method {
-            HttpMethod::Get => {
-                self.http_client
-                    .get(&url, headers)
-                    .await
-            }
+            HttpMethod::Get => self.http_client.get(&url, headers).await,
             HttpMethod::Post => {
                 self.http_client
                     .post(&url, headers, request.body_str())

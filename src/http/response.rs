@@ -5,7 +5,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::error::{WxPayError, WxPayResult, ErrorResponse};
+use crate::error::{ErrorResponse, WxPayError, WxPayResult};
 use crate::http::client::HttpResponse;
 
 /// 响应处理器
@@ -62,7 +62,11 @@ impl ResponseHandler {
                         item.get("message")
                             .and_then(Value::as_str)
                             .map(ToOwned::to_owned)
-                            .or_else(|| item.get("error").and_then(Value::as_str).map(ToOwned::to_owned))
+                            .or_else(|| {
+                                item.get("error")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned)
+                            })
                     })
             });
 
@@ -297,11 +301,7 @@ mod tests {
 
     #[test]
     fn test_response_handler_success() {
-        let response = HttpResponse::new(
-            200,
-            vec![],
-            r#"{"code":"SUCCESS"}"#.to_string(),
-        );
+        let response = HttpResponse::new(200, vec![], r#"{"code":"SUCCESS"}"#.to_string());
 
         let body = ResponseHandler::handle(&response).unwrap();
         assert_eq!(body, r#"{"code":"SUCCESS"}"#);
@@ -349,11 +349,7 @@ mod tests {
             code: String,
         }
 
-        let response = HttpResponse::new(
-            200,
-            vec![],
-            r#"{"code":"SUCCESS"}"#.to_string(),
-        );
+        let response = HttpResponse::new(200, vec![], r#"{"code":"SUCCESS"}"#.to_string());
 
         let parsed: TestResponse = ResponseHandler::parse(&response).unwrap();
         assert_eq!(parsed.code, "SUCCESS");

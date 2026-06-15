@@ -4,13 +4,13 @@
 
 use std::sync::Arc;
 
+use super::WxPayClient;
+use crate::auth::{Sha256RsaSigner, Sha256RsaVerifier, Signer, Verifier};
+use crate::cert::CertManager;
 use crate::config::WxPayConfig;
 use crate::error::{WxPayError, WxPayResult};
-use crate::auth::{Signer, Verifier, Sha256RsaSigner, Sha256RsaVerifier};
-use crate::cert::CertManager;
 use crate::http::{HttpClient, ReqwestHttpClient};
 use crate::services::transport::TransportObserver;
-use super::WxPayClient;
 
 /// 客户端构建器
 ///
@@ -98,9 +98,9 @@ impl WxPayClientBuilder {
 
     /// 构建客户端
     pub async fn build(self) -> WxPayResult<WxPayClient> {
-        let config = self.config.ok_or_else(|| {
-            WxPayError::missing_config("config")
-        })?;
+        let config = self
+            .config
+            .ok_or_else(|| WxPayError::missing_config("config"))?;
         let config = Arc::new(config);
 
         // 创建或使用提供的 HTTP 客户端
@@ -133,9 +133,9 @@ impl WxPayClientBuilder {
         };
 
         // 创建或使用提供的证书管理器
-        let cert_manager = self.cert_manager.unwrap_or_else(|| {
-            Arc::new(CertManager::new())
-        });
+        let cert_manager = self
+            .cert_manager
+            .unwrap_or_else(|| Arc::new(CertManager::new()));
 
         WxPayClient::new_with_components(
             (*config).clone(),

@@ -2,10 +2,10 @@
 //!
 //! 提供请求签名和响应验签功能。
 
+pub mod credentials;
 pub mod signer;
 pub mod verifier;
-pub mod credentials;
 
-pub use signer::{Signer, Sha256RsaSigner};
-pub use verifier::{Verifier, Sha256RsaVerifier};
 pub use credentials::Credentials;
+pub use signer::{Sha256RsaSigner, Signer};
+pub use verifier::{Sha256RsaVerifier, Verifier};

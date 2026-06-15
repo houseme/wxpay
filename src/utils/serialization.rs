@@ -2,8 +2,8 @@
 //!
 //! 提供 JSON 序列化和 URL 编码相关的工具函数。
 
-use serde::Serialize;
 use crate::error::{WxPayError, WxPayResult};
+use serde::Serialize;
 
 /// 将结构体序列化为 JSON 字符串
 ///
@@ -92,9 +92,8 @@ pub fn to_json_pretty<T: Serialize>(value: &T) -> WxPayResult<String> {
 /// assert!(encoded.contains("name=test"));
 /// ```
 pub fn to_url_encoded<T: Serialize>(value: &T) -> WxPayResult<String> {
-    serde_urlencoded::to_string(value).map_err(|e| {
-        WxPayError::UrlEncodeError(format!("URL 编码失败：{}", e))
-    })
+    serde_urlencoded::to_string(value)
+        .map_err(|e| WxPayError::UrlEncodeError(format!("URL 编码失败：{}", e)))
 }
 
 /// 将 JSON 字符串反序列化为结构体
@@ -222,9 +221,7 @@ pub fn hex_encode(data: &[u8]) -> String {
 /// assert_eq!(decoded, b"Hello");
 /// ```
 pub fn hex_decode(encoded: &str) -> WxPayResult<Vec<u8>> {
-    hex::decode(encoded).map_err(|e| {
-        WxPayError::InternalError(format!("Hex 解码失败：{}", e))
-    })
+    hex::decode(encoded).map_err(|e| WxPayError::InternalError(format!("Hex 解码失败：{}", e)))
 }
 
 #[cfg(test)]

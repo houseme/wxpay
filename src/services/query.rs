@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付订单查询功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -187,7 +187,10 @@ impl QueryService {
     }
 
     /// 通过商户订单号查询（兼容 `wechatpay-go` 风格）
-    pub async fn query_order_by_out_trade_no(&self, out_trade_no: &str) -> WxPayResult<Transaction> {
+    pub async fn query_order_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> WxPayResult<Transaction> {
         self.by_out_trade_no(out_trade_no).await
     }
 

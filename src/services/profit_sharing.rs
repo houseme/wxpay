@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付分账功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -300,12 +300,18 @@ impl ProfitSharingService {
     }
 
     /// 创建分账（文档风格）
-    pub async fn create(&self, request: &ProfitSharingRequest) -> WxPayResult<ProfitSharingResponse> {
+    pub async fn create(
+        &self,
+        request: &ProfitSharingRequest,
+    ) -> WxPayResult<ProfitSharingResponse> {
         self.create_profit_sharing(request).await
     }
 
     /// 创建分账单（兼容 `wechatpay-go` 风格）
-    pub async fn create_order(&self, request: &ProfitSharingRequest) -> WxPayResult<ProfitSharingResponse> {
+    pub async fn create_order(
+        &self,
+        request: &ProfitSharingRequest,
+    ) -> WxPayResult<ProfitSharingResponse> {
         self.create_profit_sharing(request).await
     }
 
@@ -355,7 +361,12 @@ impl ProfitSharingService {
         );
 
         self.transport
-            .request(HttpMethod::Get, &path, None, "profit_sharing.query_profit_sharing")
+            .request(
+                HttpMethod::Get,
+                &path,
+                None,
+                "profit_sharing.query_profit_sharing",
+            )
             .await
     }
 
@@ -395,7 +406,10 @@ impl ProfitSharingService {
     }
 
     /// 完成分账（文档风格）
-    pub async fn finish(&self, request: &ProfitSharingFinishRequest) -> WxPayResult<ProfitSharingFinishResponse> {
+    pub async fn finish(
+        &self,
+        request: &ProfitSharingFinishRequest,
+    ) -> WxPayResult<ProfitSharingFinishResponse> {
         self.finish_profit_sharing(request).await
     }
 
@@ -448,6 +462,9 @@ mod tests {
         }"#;
         let response: ProfitSharingResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.status, "FINISHED");
-        assert_eq!(response.order_id, "6110000071100999991182020050700019480101");
+        assert_eq!(
+            response.order_id,
+            "6110000071100999991182020050700019480101"
+        );
     }
 }

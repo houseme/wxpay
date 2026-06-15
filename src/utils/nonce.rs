@@ -107,7 +107,10 @@ mod tests {
         assert_ne!(s1, s2);
 
         // 应该只包含小写字母和数字
-        assert!(s1.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(
+            s1.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]

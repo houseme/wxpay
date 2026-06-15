@@ -2,14 +2,14 @@
 //!
 //! 提供微信支付证书管理功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
-use crate::http::{HttpClient, HttpMethod};
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
+use crate::error::{WxPayError, WxPayResult};
+use crate::http::{HttpClient, HttpMethod};
 use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 证书信息
@@ -111,7 +111,12 @@ impl CertificateService {
     pub async fn get_certificates(&self) -> WxPayResult<Vec<CertificateInfo>> {
         let response_json: Value = self
             .transport
-            .request(HttpMethod::Get, "/v3/certificates", None, "certificate.get_certificates")
+            .request(
+                HttpMethod::Get,
+                "/v3/certificates",
+                None,
+                "certificate.get_certificates",
+            )
             .await?;
 
         let certificate_items = response_json
@@ -125,8 +130,9 @@ impl CertificateService {
         let mut certificates = Vec::with_capacity(certificate_items.len());
 
         for item in certificate_items {
-            let info: CertificateInfo = serde_json::from_value(item.clone())
-                .map_err(|e| WxPayError::CertificateParseError(format!("证书信息解析失败：{}", e)))?;
+            let info: CertificateInfo = serde_json::from_value(item.clone()).map_err(|e| {
+                WxPayError::CertificateParseError(format!("证书信息解析失败：{}", e))
+            })?;
             certificates.push(info);
         }
 

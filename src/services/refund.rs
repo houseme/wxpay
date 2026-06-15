@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付退款功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -191,12 +191,7 @@ impl RefundService {
     pub async fn query_refund(&self, out_refund_no: &str) -> WxPayResult<RefundResponse> {
         let path = format!("/v3/refund/domestic/refunds/{}", out_refund_no);
         self.transport
-            .request(
-                HttpMethod::Get,
-                &path,
-                None,
-                "refund.query_refund",
-            )
+            .request(HttpMethod::Get, &path, None, "refund.query_refund")
             .await
     }
 

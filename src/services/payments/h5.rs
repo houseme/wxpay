@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付 H5 支付功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -211,8 +211,7 @@ mod tests {
 
     #[test]
     fn test_h5_response_deserialization() {
-        let json =
-            r#"{"h5_url":"https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb?prepay_id=wx201410272009395522657a690ac89ed300"}"#;
+        let json = r#"{"h5_url":"https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb?prepay_id=wx201410272009395522657a690ac89ed300"}"#;
         let response: H5Response = serde_json::from_str(json).unwrap();
         assert!(response.h5_url.starts_with("https://wx.tenpay.com"));
     }

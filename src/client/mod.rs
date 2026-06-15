@@ -8,25 +8,21 @@ pub use builder::WxPayClientBuilder;
 
 use std::sync::Arc;
 
+use crate::auth::{Credentials, Sha256RsaSigner, Sha256RsaVerifier, Signer, Verifier};
+use crate::cert::CertManager;
 use crate::config::WxPayConfig;
 use crate::error::WxPayResult;
-use crate::auth::{Signer, Verifier, Sha256RsaSigner, Sha256RsaVerifier, Credentials};
-use crate::cert::CertManager;
 use crate::http::{HttpClient, ReqwestHttpClient};
-use crate::services::payments::{JsapiService, NativeService, H5Service, AppService};
-use crate::services::refund::{RefundResponse, RefundService};
-use crate::services::transfer::{TransferResponse, TransferService, TransferRequest};
-use crate::services::profit_sharing::{
-    ProfitSharingFinishRequest,
-    ProfitSharingFinishResponse,
-    ProfitSharingRequest,
-    ProfitSharingResponse,
-    ProfitSharingService,
-    QueryProfitSharingRequest,
-};
-use crate::services::certificate::CertificateService;
-use crate::services::query::{QueryService, Transaction};
 use crate::notify::NotifyHandler;
+use crate::services::certificate::CertificateService;
+use crate::services::payments::{AppService, H5Service, JsapiService, NativeService};
+use crate::services::profit_sharing::{
+    ProfitSharingFinishRequest, ProfitSharingFinishResponse, ProfitSharingRequest,
+    ProfitSharingResponse, ProfitSharingService, QueryProfitSharingRequest,
+};
+use crate::services::query::{QueryService, Transaction};
+use crate::services::refund::{RefundResponse, RefundService};
+use crate::services::transfer::{TransferRequest, TransferResponse, TransferService};
 use crate::services::transport::TransportObserver;
 
 /// 微信支付客户端
@@ -311,7 +307,10 @@ impl WxPayClient {
     }
 
     /// 通过商户订单号查询订单（兼容 `wechatpay-go` 风格快捷入口）
-    pub async fn query_order_by_out_trade_no(&self, out_trade_no: &str) -> WxPayResult<Transaction> {
+    pub async fn query_order_by_out_trade_no(
+        &self,
+        out_trade_no: &str,
+    ) -> WxPayResult<Transaction> {
         self.query().query_order_by_out_trade_no(out_trade_no).await
     }
 
@@ -322,11 +321,16 @@ impl WxPayClient {
 
     /// 按商户退款单号查询退款（兼容 `wechatpay-go` 风格快捷入口）
     pub async fn query_by_out_refund_no(&self, out_refund_no: &str) -> WxPayResult<RefundResponse> {
-        self.refunddomestic().query_by_out_refund_no(out_refund_no).await
+        self.refunddomestic()
+            .query_by_out_refund_no(out_refund_no)
+            .await
     }
 
     /// 发起批量转账（兼容 `wechatpay-go` 风格快捷入口）
-    pub async fn initiate_batch_transfer(&self, request: &TransferRequest) -> WxPayResult<TransferResponse> {
+    pub async fn initiate_batch_transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> WxPayResult<TransferResponse> {
         self.transferbatch().initiate_batch_transfer(request).await
     }
 

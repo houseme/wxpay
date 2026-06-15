@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付转账功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
@@ -173,7 +173,10 @@ impl TransferService {
     }
 
     /// 创建转账
-    pub async fn create_transfer(&self, request: &TransferRequest) -> WxPayResult<TransferResponse> {
+    pub async fn create_transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> WxPayResult<TransferResponse> {
         let body = serde_json::to_string(request)?;
 
         self.transport
@@ -192,7 +195,10 @@ impl TransferService {
     }
 
     /// 发起批量转账（兼容 `wechatpay-go` 风格）
-    pub async fn initiate_batch_transfer(&self, request: &TransferRequest) -> WxPayResult<TransferResponse> {
+    pub async fn initiate_batch_transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> WxPayResult<TransferResponse> {
         self.create_transfer(request).await
     }
 
@@ -210,12 +216,18 @@ impl TransferService {
     }
 
     /// 查询转账批次（文档风格）
-    pub async fn query_batch(&self, request: &QueryTransferBatchRequest) -> WxPayResult<TransferResponse> {
+    pub async fn query_batch(
+        &self,
+        request: &QueryTransferBatchRequest,
+    ) -> WxPayResult<TransferResponse> {
         self.query_transfer_batch(&request.out_batch_no).await
     }
 
     /// 查询转账（文档/API 表格简化命名）
-    pub async fn query(&self, request: &QueryTransferBatchRequest) -> WxPayResult<TransferResponse> {
+    pub async fn query(
+        &self,
+        request: &QueryTransferBatchRequest,
+    ) -> WxPayResult<TransferResponse> {
         self.query_batch(request).await
     }
 
@@ -270,6 +282,9 @@ mod tests {
         }"#;
         let response: TransferResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.batch_status, "ACCEPT");
-        assert_eq!(response.batch_id, "1030000071100999991182020050700019480101");
+        assert_eq!(
+            response.batch_id,
+            "1030000071100999991182020050700019480101"
+        );
     }
 }
