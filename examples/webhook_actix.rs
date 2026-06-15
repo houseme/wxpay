@@ -1,12 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use actix_web::{post, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder, post, web};
 use dotenvy::dotenv;
 use serde_json::json;
-use wxpay_rs::{
-    notify::handler::NotifyRequest,
-    WxPayClient, WxPayConfig, WxPayError, WxPayResult,
-};
+use wxpay_rs::{WxPayClient, WxPayConfig, WxPayError, WxPayResult, notify::handler::NotifyRequest};
 
 #[derive(Clone)]
 struct AppState {
@@ -40,9 +37,8 @@ async fn build_client() -> WxPayResult<WxPayClient> {
 }
 
 fn required_env(name: &str) -> WxPayResult<String> {
-    std::env::var(name).map_err(|_| {
-        WxPayError::missing_config(format!("{name} environment variable is required"))
-    })
+    std::env::var(name)
+        .map_err(|_| WxPayError::missing_config(format!("{name} environment variable is required")))
 }
 
 fn server_bind_addr() -> String {

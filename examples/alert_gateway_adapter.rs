@@ -1,12 +1,12 @@
-use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -88,7 +88,12 @@ impl AlertGatewayAdapter {
         }
     }
 
-    pub fn with_thresholds(mut self, burst_threshold: u64, sample_every: u64, window_secs: u64) -> Self {
+    pub fn with_thresholds(
+        mut self,
+        burst_threshold: u64,
+        sample_every: u64,
+        window_secs: u64,
+    ) -> Self {
         self.burst_threshold = burst_threshold.max(1);
         self.sample_every = sample_every.max(1);
         self.window = Duration::from_secs(window_secs.max(1));
@@ -267,10 +272,7 @@ impl TransportObserver for AlertGatewayAdapter {
                             );
                             emit_fallback(
                                 &fallback_sink,
-                                format!(
-                                    "[alert-fallback:{}] {}",
-                                    route_for_log, payload_for_print
-                                ),
+                                format!("[alert-fallback:{}] {}", route_for_log, payload_for_print),
                             );
                         }
                     } else if fallback {
@@ -309,10 +311,7 @@ impl TransportObserver for AlertGatewayAdapter {
     }
 }
 
-fn emit_fallback(
-    sink: &Option<Arc<dyn Fn(&str) + Send + Sync>>,
-    text: impl AsRef<str>,
-) {
+fn emit_fallback(sink: &Option<Arc<dyn Fn(&str) + Send + Sync>>, text: impl AsRef<str>) {
     if let Some(sink) = sink {
         (sink)(text.as_ref());
     } else {
@@ -345,7 +344,9 @@ impl AlertGateway for HttpAlertGateway {
         let token = token.map(|value| value.to_string());
         let payload = payload.clone();
 
-        Box::pin(async move { send_to_alert_gateway_once(&endpoint, token.as_deref(), &payload).await })
+        Box::pin(
+            async move { send_to_alert_gateway_once(&endpoint, token.as_deref(), &payload).await },
+        )
     }
 }
 
@@ -440,7 +441,10 @@ async fn send_to_alert_gateway(
             Err(err) => {
                 tries = tries.saturating_add(1);
                 if tries > max_retries {
-                    return Err(format!("alert gateway failed after retry {}: {}", max_retries, err));
+                    return Err(format!(
+                        "alert gateway failed after retry {}: {}",
+                        max_retries, err
+                    ));
                 }
 
                 sleep(Duration::from_millis(backoff_ms)).await;
@@ -483,18 +487,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "medium.unknown".to_string(),
     ];
 
-    let _builder = WxPayClientBuilder::new()
-        .transport_observer(
-            AlertGatewayAdapter::new(routes)
-                .with_thresholds(20, 8, 60)
-                .with_gateway(
-                    "https://alert-gateway.example.internal/v1/events",
-                    Some("replace-with-service-token".to_string()),
-                )
-                .with_retry_policy(2, 200, 5_000)
-                .with_concurrency_limit(16)
-                .with_fallback_to_stdout(true),
-        );
+    let _builder = WxPayClientBuilder::new().transport_observer(
+        AlertGatewayAdapter::new(routes)
+            .with_thresholds(20, 8, 60)
+            .with_gateway(
+                "https://alert-gateway.example.internal/v1/events",
+                Some("replace-with-service-token".to_string()),
+            )
+            .with_retry_policy(2, 200, 5_000)
+            .with_concurrency_limit(16)
+            .with_fallback_to_stdout(true),
+    );
 
     // 这里展示接入方式；真实项目里继续沿用你们现有配置组装 client。
     // let client = builder.config(config).build().await?;

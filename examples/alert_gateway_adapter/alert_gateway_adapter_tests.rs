@@ -1,12 +1,12 @@
 #[cfg(test)]
 use super::*;
+use serde_json::Value;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use wxpay_rs::error::{WxPayAlertLevel, WxPayErrorKind};
-use serde_json::Value;
 
 fn critical_test_event() -> (TransportEvent, WxPayError) {
     let event = TransportEvent {
@@ -54,7 +54,10 @@ fn low_level_event() -> (TransportEvent, WxPayError) {
 
 #[tokio::test]
 async fn alert_gateway_retry_count_should_match_policy() {
-    let mock = Arc::new(MockAlertGateway::script_fail_n_times(2, "temporary gateway error"));
+    let mock = Arc::new(MockAlertGateway::script_fail_n_times(
+        2,
+        "temporary gateway error",
+    ));
 
     let observer = AlertGatewayAdapter::new(vec!["critical.".to_string()])
         .with_gateway("https://alert-gateway.example.internal/v1/events", None)
@@ -189,7 +192,11 @@ async fn alert_gateway_no_endpoint_should_fallback_without_gateway_call() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    assert_eq!(entries.len(), 1, "no-endpoint fallback should emit one line");
+    assert_eq!(
+        entries.len(),
+        1,
+        "no-endpoint fallback should emit one line"
+    );
     assert!(
         entries[0].contains("[alert-fallback(no-endpoint)]"),
         "expect no-endpoint fallback line, got: {}",
@@ -253,7 +260,11 @@ async fn alert_gateway_low_level_should_not_send_alert() {
 
     tokio::time::sleep(Duration::from_millis(20)).await;
 
-    assert_eq!(mock.call_count(), 0, "low-level non-retry event should not alert");
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "low-level non-retry event should not alert"
+    );
 }
 
 #[tokio::test]
@@ -279,7 +290,11 @@ async fn alert_gateway_send_error_should_emit_fallback_lines() {
 
     tokio::time::sleep(Duration::from_millis(80)).await;
 
-    assert_eq!(mock.call_count(), 1, "retry policy 0 should keep one send attempt");
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "retry policy 0 should keep one send attempt"
+    );
 
     let entries = logs
         .lock()
