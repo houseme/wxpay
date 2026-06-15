@@ -68,7 +68,7 @@ spki = "0.8"
 # 异步工具
 futures = "0.3"
 pin-project-lite = "0.2"
-hmac = "0.12.1"
+hmac = "0.13.0"
 
 [dev-dependencies]
 # 测试框架
