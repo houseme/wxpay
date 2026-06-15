@@ -10,7 +10,7 @@ homepage = "https://github.com/houseme/wxpay"
 repository = "https://github.com/houseme/wxpay"
 license = "Apache-2.0"
 keywords = ["wechat", "wechatpay", "payment", "sdk", "api"]
-categories = ["api-bindings", "payment", "web-programming::http-client"]
+categories = ["api-bindings", "web-programming::http-client"]
 
 [lib]
 name = "wxpay_rs"
