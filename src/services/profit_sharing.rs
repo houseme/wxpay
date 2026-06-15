@@ -467,4 +467,11 @@ mod tests {
             "6110000071100999991182020050700019480101"
         );
     }
+
+    #[test]
+    fn test_go_style_profit_sharing_alias_signatures_exist() {
+        let _ = ProfitSharingService::create_order;
+        let _ = ProfitSharingService::query_order;
+        let _ = ProfitSharingService::finish_order;
+    }
 }

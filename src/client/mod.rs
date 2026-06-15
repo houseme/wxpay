@@ -397,6 +397,9 @@ impl std::fmt::Debug for WxPayClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::profit_sharing::ProfitSharingService;
+    use crate::services::refund::RefundService;
+    use crate::services::transfer::TransferService;
 
     fn create_test_config() -> WxPayConfig {
         WxPayConfig::builder()
@@ -414,5 +417,12 @@ mod tests {
         let config = create_test_config();
         assert_eq!(config.app_id, "wx88888888");
         assert_eq!(config.merchant_id, "1900000109");
+    }
+
+    #[test]
+    fn test_go_style_accessor_signatures_exist() {
+        let _: fn(&WxPayClient) -> &RefundService = WxPayClient::refunddomestic;
+        let _: fn(&WxPayClient) -> &TransferService = WxPayClient::transferbatch;
+        let _: fn(&WxPayClient) -> &ProfitSharingService = WxPayClient::profitsharing;
     }
 }

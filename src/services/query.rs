@@ -291,4 +291,10 @@ mod tests {
         assert!(json.contains("out_trade_no_001"));
         assert!(json.contains("1900000109"));
     }
+
+    #[test]
+    fn test_go_style_query_alias_signatures_exist() {
+        let _ = QueryService::query_order_by_id;
+        let _ = QueryService::query_order_by_out_trade_no;
+    }
 }

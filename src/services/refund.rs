@@ -249,4 +249,9 @@ mod tests {
         assert_eq!(response.status, "SUCCESS");
         assert_eq!(response.refund_id, "50000000382019052709732678869");
     }
+
+    #[test]
+    fn test_go_style_refund_alias_signature_exists() {
+        let _ = RefundService::query_by_out_refund_no;
+    }
 }

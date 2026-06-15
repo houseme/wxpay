@@ -287,4 +287,10 @@ mod tests {
             "1030000071100999991182020050700019480101"
         );
     }
+
+    #[test]
+    fn test_go_style_transfer_alias_signatures_exist() {
+        let _ = TransferService::initiate_batch_transfer;
+        let _ = TransferService::get_transfer_batch_by_out_batch_no;
+    }
 }
