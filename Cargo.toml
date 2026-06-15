@@ -76,6 +76,9 @@ tokio-test = "0.4"
 mockall = "0.14.0"
 wiremock = "0.6"
 pretty_assertions = "1.4"
+axum = "0.8"
+actix-web = "4.11"
+dotenvy = "0.15"
 
 # 测试数据生成
 fake = { version = "5.1", features = ["derive"] }
@@ -87,6 +90,7 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 default = ["tls-rustls"]
 tls-rustls = ["reqwest/rustls"]
 full = ["tls-rustls"]
+docs = []
 
 [profile.release]
 opt-level = 3
