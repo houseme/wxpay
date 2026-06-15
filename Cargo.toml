@@ -1,12 +1,98 @@
 [package]
 name = "wxpay-rs"
 version = "0.0.1"
-edition = "2024"
+edition = "2021"
+rust-version = "1.70.0"
 authors = ["houseme <housemecn@gmail.com>"]
-description = "wechat pay sdk"
-license = "Apache-2.0"
-homepage = "https://houseme.github.io/wxpay"
-repository = "https://github.com/houseme/wxpay"
+description = "微信支付 API v3 Rust SDK - WeChat Pay API v3 Rust SDK"
 documentation = "https://docs.rs/wxpay-rs"
+readme = "README.md"
+homepage = "https://github.com/houseme/wxpay"
+repository = "https://github.com/houseme/wxpay"
+license = "Apache-2.0"
+keywords = ["wechat", "wechatpay", "payment", "sdk", "api"]
+categories = ["api-bindings", "payment", "web-programming::http-client"]
+
+[lib]
+name = "wxpay_rs"
+path = "src/lib.rs"
+crate-type = ["lib"]
 
 [dependencies]
+# 异步运行时
+tokio = { version = "1.36", features = ["full"] }
+async-trait = "0.1"
+
+# HTTP 客户端
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# TLS
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
+rustls-pemfile = "2.1"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_urlencoded = "0.7"
+
+# 错误处理
+thiserror = "2.0"
+
+# 日志
+tracing = "0.1"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID 生成
+uuid = { version = "1.7", features = ["v4"] }
+
+# URL 解析
+url = "2.5"
+
+# 加密库
+rsa = "0.9"
+sha2 = "0.10"
+digest = "0.10"
+aes-gcm = "0.10"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+
+# 证书处理
+x509-cert = "0.2"
+der = "0.7"
+pkcs1 = "0.7"
+pkcs8 = "0.10"
+spki = "0.7"
+
+# 异步工具
+futures = "0.3"
+pin-project-lite = "0.2"
+
+[dev-dependencies]
+# 测试框架
+tokio-test = "0.4"
+mockall = "0.12"
+wiremock = "0.6"
+pretty_assertions = "1.4"
+
+# 测试数据生成
+fake = { version = "3.1", features = ["derive"] }
+
+# 性能测试
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[features]
+default = ["tls-rustls"]
+tls-rustls = ["reqwest/rustls-tls"]
+full = ["tls-rustls"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
