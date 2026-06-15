@@ -12,6 +12,8 @@ use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use wxpay_rs::{TransportEvent, TransportObserver, WxPayClientBuilder, WxPayError};
 
+type FallbackSink = Arc<dyn Fn(&str) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct AlertGatewayAdapter {
     /// 路由规则清单（按前缀匹配）
@@ -58,7 +60,7 @@ pub struct AlertGatewayAdapter {
     gateway_client: Arc<dyn AlertGateway>,
 
     /// 告警 fallback 事件输出通道（None=stdout）
-    fallback_sink: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    fallback_sink: Option<FallbackSink>,
 }
 
 #[derive(Debug)]
@@ -311,7 +313,7 @@ impl TransportObserver for AlertGatewayAdapter {
     }
 }
 
-fn emit_fallback(sink: &Option<Arc<dyn Fn(&str) + Send + Sync>>, text: impl AsRef<str>) {
+fn emit_fallback(sink: &Option<FallbackSink>, text: impl AsRef<str>) {
     if let Some(sink) = sink {
         (sink)(text.as_ref());
     } else {
