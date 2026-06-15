@@ -2,13 +2,14 @@
 //!
 //! 提供 RSA-OAEP 加密和解密功能，用于敏感信息的加解密。
 
+use base64::Engine;
+use der::Encode;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs1::DecodeRsaPublicKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{RsaPrivateKey, RsaPublicKey, Oaep, Pkcs1v15Encrypt};
+use rsa::{Oaep, Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
-use base64::Engine;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -49,14 +50,16 @@ impl RsaOaepCipher {
         use der::Decode;
         use x509_cert::Certificate;
 
-        let cert = Certificate::from_der(cert_der).map_err(|e| {
-            WxPayError::CertificateParseError(format!("证书解析失败：{}", e))
-        })?;
+        let cert = Certificate::from_der(cert_der)
+            .map_err(|e| WxPayError::CertificateParseError(format!("证书解析失败：{}", e)))?;
 
-        let spki = &cert.tbs_certificate.subject_public_key_info;
-        let public_key = RsaPublicKey::try_from(spki.clone()).map_err(|e| {
-            WxPayError::CertificateParseError(format!("提取公钥失败：{}", e))
-        })?;
+        let spki = cert.tbs_certificate().subject_public_key_info();
+        let spki_der = spki
+            .to_der()
+            .map_err(|e| WxPayError::CertificateParseError(format!("提取证书 SPKI 失败：{}", e)))?;
+
+        let public_key = RsaPublicKey::from_public_key_der(&spki_der)
+            .map_err(|e| WxPayError::CertificateParseError(format!("提取公钥失败：{}", e)))?;
 
         Ok(Self { public_key })
     }
@@ -71,9 +74,8 @@ impl RsaOaepCipher {
     ///
     /// 返回加密器实例
     pub fn from_public_key(public_key_pem: &[u8]) -> WxPayResult<Self> {
-        let pem_str = std::str::from_utf8(public_key_pem).map_err(|e| {
-            WxPayError::InvalidKey(format!("无效的 UTF-8 编码：{}", e))
-        })?;
+        let pem_str = std::str::from_utf8(public_key_pem)
+            .map_err(|e| WxPayError::InvalidKey(format!("无效的 UTF-8 编码：{}", e)))?;
 
         // 尝试 PKCS#8 格式
         if let Ok(key) = RsaPublicKey::from_public_key_pem(pem_str) {
@@ -100,8 +102,8 @@ impl RsaOaepCipher {
     ///
     /// 返回 Base64 编码的密文
     pub fn encrypt(&self, plaintext: &str) -> WxPayResult<String> {
-        let mut rng = rand::thread_rng();
-        let padding = Oaep::new::<Sha256>();
+        let mut rng = rand::rng();
+        let padding = Oaep::<Sha256>::new();
 
         let ciphertext = self
             .public_key
@@ -121,7 +123,7 @@ impl RsaOaepCipher {
     ///
     /// 返回 Base64 编码的密文
     pub fn encrypt_pkcs1v15(&self, plaintext: &str) -> WxPayResult<String> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let ciphertext = self
             .public_key
@@ -172,9 +174,8 @@ impl RsaOaepDecrypter {
     ///
     /// 返回解密器实例
     pub fn new(private_key_pem: &[u8]) -> WxPayResult<Self> {
-        let pem_str = std::str::from_utf8(private_key_pem).map_err(|e| {
-            WxPayError::InvalidPrivateKey(format!("无效的 UTF-8 编码：{}", e))
-        })?;
+        let pem_str = std::str::from_utf8(private_key_pem)
+            .map_err(|e| WxPayError::InvalidPrivateKey(format!("无效的 UTF-8 编码：{}", e)))?;
 
         // 尝试 PKCS#8 格式
         if let Ok(key) = RsaPrivateKey::from_pkcs8_pem(pem_str) {
@@ -205,16 +206,15 @@ impl RsaOaepDecrypter {
             .decode(ciphertext)
             .map_err(|e| WxPayError::InvalidCiphertext(format!("Base64 解码失败：{}", e)))?;
 
-        let padding = Oaep::new::<Sha256>();
+        let padding = Oaep::<Sha256>::new();
 
         let plaintext = self
             .private_key
             .decrypt(padding, &ciphertext_bytes)
             .map_err(|e| WxPayError::DecryptionError(format!("RSA-OAEP 解密失败：{}", e)))?;
 
-        String::from_utf8(plaintext).map_err(|e| {
-            WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e))
-        })
+        String::from_utf8(plaintext)
+            .map_err(|e| WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e)))
     }
 
     /// 解密数据（使用 PKCS1v15 填充）
@@ -236,9 +236,8 @@ impl RsaOaepDecrypter {
             .decrypt(Pkcs1v15Encrypt, &ciphertext_bytes)
             .map_err(|e| WxPayError::DecryptionError(format!("RSA PKCS1v15 解密失败：{}", e)))?;
 
-        String::from_utf8(plaintext).map_err(|e| {
-            WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e))
-        })
+        String::from_utf8(plaintext)
+            .map_err(|e| WxPayError::DecryptionError(format!("解密结果不是有效的 UTF-8: {}", e)))
     }
 }
 
@@ -251,11 +250,14 @@ impl std::fmt::Debug for RsaOaepDecrypter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsa::RsaPrivateKey;
-    use rand::rngs::OsRng;
+    use pkcs8::EncodePrivateKey;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use rsa::{RsaPrivateKey, RsaPublicKey};
+    use spki::EncodePublicKey;
 
     fn generate_test_keypair() -> (Vec<u8>, Vec<u8>) {
-        let mut rng = OsRng;
+        let mut rng = StdRng::seed_from_u64(42);
         let bits = 2048;
         let private_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate key");
         let public_key = RsaPublicKey::from(&private_key);
@@ -263,7 +265,10 @@ mod tests {
         let private_key_pem = private_key.to_pkcs8_pem(Default::default()).unwrap();
         let public_key_pem = public_key.to_public_key_pem(Default::default()).unwrap();
 
-        (private_key_pem.as_bytes().to_vec(), public_key_pem.as_bytes().to_vec())
+        (
+            private_key_pem.as_bytes().to_vec(),
+            public_key_pem.as_bytes().to_vec(),
+        )
     }
 
     #[test]

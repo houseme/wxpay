@@ -2,10 +2,10 @@
 //!
 //! 提供构建微信支付 API 请求的功能。
 
-use std::collections::HashMap;
 use serde::Serialize;
+use std::collections::HashMap;
 
-use crate::error::{WxPayError, WxPayResult};
+use crate::error::WxPayResult;
 use crate::utils::nonce::generate_nonce;
 use crate::utils::timestamp::get_timestamp;
 
@@ -206,6 +206,7 @@ impl WxPayRequest {
 /// 微信支付请求构建器
 ///
 /// 专门用于构建微信支付 API 请求的构建器。
+#[allow(dead_code)]
 pub struct WxPayRequestBuilder {
     /// 商户号
     merchant_id: String,
@@ -294,11 +295,13 @@ mod tests {
 
     #[test]
     fn test_request_full_url() {
-        let request = RequestBuilder::new(HttpMethod::Get, "/v3/pay/transactions/jsapi")
-            .build();
+        let request = RequestBuilder::new(HttpMethod::Get, "/v3/pay/transactions/jsapi").build();
 
         let full_url = request.full_url("https://api.mch.weixin.qq.com");
-        assert_eq!(full_url, "https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi");
+        assert_eq!(
+            full_url,
+            "https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi"
+        );
     }
 
     #[test]
@@ -323,11 +326,8 @@ mod tests {
 
     #[test]
     fn test_wxpay_request_builder() {
-        let builder = WxPayRequestBuilder::new(
-            "1900000109",
-            "CERT123456",
-            "https://api.mch.weixin.qq.com",
-        );
+        let builder =
+            WxPayRequestBuilder::new("1900000109", "CERT123456", "https://api.mch.weixin.qq.com");
 
         let request = builder.post("/v3/pay/transactions/jsapi").build();
         assert_eq!(request.method, HttpMethod::Post);

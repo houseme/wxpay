@@ -2,8 +2,8 @@
 //!
 //! 提供微信支付平台证书的管理功能。
 
-pub mod manager;
 pub mod downloader;
+pub mod manager;
 
-pub use manager::CertManager;
 pub use downloader::CertDownloader;
+pub use manager::CertManager;

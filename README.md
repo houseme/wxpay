@@ -23,11 +23,52 @@
 
 ```toml
 [dependencies]
-wxpay-rs = "0.1"
+wxpay-rs = "2.0.0"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
+
+## 🧭 迁移与 Webhook 示例入口
+
+如果你是从 `wechatpay-apiv3/wechatpay-go` 迁移过来，或者准备直接接入支付/退款回调，可以先看这几份材料：
+
+- [examples/webhook_axum.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_axum.rs:1)：`Axum` 支付/退款回调可编译骨架
+- [examples/webhook_actix.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_actix.rs:1)：`Actix-Web` 支付/退款回调可编译骨架
+- [.env.example](/Users/zhi/Documents/code/rust/houseme/wxpay/.env.example:1)：本地联调所需环境变量模板
+
+常见启动方式：
+
+```bash
+cp .env.example .env
+
+# Axum
+cargo run --example webhook_axum
+
+# Actix-Web
+cargo run --example webhook_actix
+```
+
+### Go 风格兼容入口
+
+为了让 `wechatpay-go` 迁移更平滑，当前还额外提供了一层薄兼容入口：
+
+- `client.refunddomestic()` / `client.transferbatch()` / `client.profitsharing()`
+- `client.query().query_order_by_out_trade_no(...)`
+- `client.query().query_order_by_id(...)`
+- `client.refunddomestic().query_by_out_refund_no(...)`
+- `client.transferbatch().initiate_batch_transfer(...)`
+- `client.transferbatch().get_transfer_batch_by_out_batch_no(...)`
+- `client.profitsharing().create_order(...)`
+- `client.profitsharing().query_order(...)`
+- `client.profitsharing().finish_order(...)`
+
+如果你希望在第一轮迁移中尽量少改调用名，可以优先使用这层兼容入口，后续再逐步回收成 `wxpay-rs` 原生风格 API。
+
+说明：
+
+- 仓库内不再跟踪迁移草稿型文档，发布版以 `README`、crate API 和 `examples/` 为准。
+- 如果你需要本地迁移笔记，建议放在已忽略的 `local-docs/` 目录中自行维护。
 
 ## 🚀 快速开始
 
@@ -146,7 +187,7 @@ async fn query_order(client: &WxPayClient) -> WxPayResult<()> {
 ### 申请退款
 
 ```rust
-use wxpay_rs::services::refunddomestic::*;
+use wxpay_rs::services::refund::*;
 
 async fn create_refund(client: &WxPayClient) -> WxPayResult<()> {
     let request = RefundRequest {
@@ -241,9 +282,9 @@ wxpay-rs/
 │       │   ├── h5.rs             # H5 支付
 │       │   ├── app.rs            # APP 支付
 │       │   └── query.rs          # 订单查询
-│       ├── refunddomestic.rs     # 退款服务
-│       ├── profitsharing.rs      # 分账服务
-│       ├── transferbatch.rs      # 转账服务
+│       ├── refund.rs             # 退款服务
+│       ├── profit_sharing.rs     # 分账服务
+│       ├── transfer.rs           # 转账服务
 │       └── fileuploader.rs       # 文件上传服务
 ├── examples/                     # 示例代码
 │   ├── jsapi_payment.rs
@@ -308,7 +349,7 @@ let config = WxPayConfig::builder()
 | `query().by_transaction_id()` | 微信支付单号查询 | ✅ |
 | `query().by_out_trade_no()` | 商户订单号查询 | ✅ |
 | `query().by_filter()` | 复杂条件查询 | ✅ |
-| `close()` | 关闭订单 | ✅ |
+| `query().close()` | 关闭订单 | ✅ |
 
 ### 退款服务
 
@@ -321,10 +362,11 @@ let config = WxPayConfig::builder()
 
 | API | 说明 | 状态 |
 |-----|------|------|
-| `profitsharing().create()` | 创建分账 | ✅ |
-| `profitsharing().query()` | 查询分账 | ✅ |
-| `profitsharing().add_receiver()` | 添加分账接收方 | ✅ |
-| `profitsharing().delete_receiver()` | 删除分账接收方 | ✅ |
+| `profit_sharing().create()` | 创建分账 | ✅ |
+| `profit_sharing().query()` | 查询分账 | ✅ |
+| `profit_sharing().add_receiver()` | 添加分账接收方 | ✅ |
+| `profit_sharing().delete_receiver()` | 删除分账接收方 | ✅ |
+| `profit_sharing().finish()` | 完成分账 | ✅ |
 
 ### 转账服务
 
@@ -337,8 +379,7 @@ let config = WxPayConfig::builder()
 
 | API | 说明 | 状态 |
 |-----|------|------|
-| `certificates().download()` | 下载平台证书 | ✅ |
-| `certificates().auto_refresh()` | 自动刷新证书 | ✅ |
+| `certificates().get_certificates()` | 获取平台证书 | ✅ |
 
 ### 文件服务
 

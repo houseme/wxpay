@@ -2,13 +2,13 @@
 //!
 //! 提供处理微信支付回调通知的功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
 use crate::auth::Verifier;
-use crate::crypto::Aes256GcmCipher;
 use crate::config::NotifyConfig;
+use crate::crypto::Aes256GcmCipher;
+use crate::error::{WxPayError, WxPayResult};
 
 /// 通知请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,15 +157,28 @@ pub struct RefundNotifyAmount {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::notify::NotifyHandler;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let handler = NotifyHandler::new(config, verifier);
+/// use wxpay_rs::{
+///     auth::{Sha256RsaVerifier, Verifier},
+///     config::NotifyConfig,
+///     notify::NotifyHandler,
+/// };
 ///
-/// let notify_request: NotifyRequest = serde_json::from_str(body)?;
-/// let payment_data = handler.handle_payment_notify(&notify_request)?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = NotifyConfig {
+///         api_v3_key: "abcdefghijklmnopqrstuvwxyz123456".to_string(),
+///         cert_serial_number: "CERT123456".to_string(),
+///         platform_certificate: vec![],
+///     };
+///     let verifier = Sha256RsaVerifier::new(vec![b"dummy certificate".to_vec()])?;
+///     let verifier: Arc<dyn Verifier> = Arc::new(verifier);
+///     let handler = NotifyHandler::new(config, verifier)?;
+///
+///     let _ = handler;
+///     Ok(())
+/// }
 /// ```
 pub struct NotifyHandler {
     /// 通知配置
@@ -264,9 +277,9 @@ impl NotifyHandler {
 
     /// 验证通知时间戳
     pub fn verify_timestamp(&self, timestamp: &str, tolerance_seconds: i64) -> WxPayResult<bool> {
-        let timestamp: i64 = timestamp.parse().map_err(|e| {
-            WxPayError::InvalidNotifyFormat(format!("无效的时间戳: {}", e))
-        })?;
+        let timestamp: i64 = timestamp
+            .parse()
+            .map_err(|e| WxPayError::InvalidNotifyFormat(format!("无效的时间戳: {}", e)))?;
 
         Ok(crate::utils::timestamp::is_timestamp_valid(
             timestamp,

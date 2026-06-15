@@ -2,10 +2,100 @@
 //!
 //! 定义了 SDK 中所有可能的错误类型，使用 thiserror 进行派生。
 
+use serde_json::Value;
 use thiserror::Error;
 
 /// 微信支付 SDK 结果类型别名
 pub type WxPayResult<T> = Result<T, WxPayError>;
+
+/// 微信支付错误码分类
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WxPayErrorKind {
+    /// 参数错误
+    InvalidParameter,
+    /// 鉴权失败
+    Authentication,
+    /// 签名或验签异常
+    Signature,
+    /// 资源不存在
+    ResourceNotFound,
+    /// 超频/限流
+    RateLimited,
+    /// 业务受限
+    BusinessBlocked,
+    /// 系统内部错误
+    Internal,
+    /// 未知错误码
+    Unknown,
+}
+
+/// 告警级别（用于日志告警策略）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WxPayAlertLevel {
+    /// 观察
+    Low,
+    /// 注意
+    Medium,
+    /// 严重
+    High,
+    /// 紧急
+    Critical,
+}
+
+impl WxPayAlertLevel {
+    /// 转字符串
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+impl WxPayErrorKind {
+    /// 转字符串（用于告警/指标标签）
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::InvalidParameter => "invalid_parameter",
+            Self::Authentication => "authentication",
+            Self::Signature => "signature",
+            Self::ResourceNotFound => "resource_not_found",
+            Self::RateLimited => "rate_limited",
+            Self::BusinessBlocked => "business_blocked",
+            Self::Internal => "internal",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// 从微信错误码映射到统一错误分类
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "PARAM_ERROR" | "INVALID_REQUEST" | "INVALID_PARAMETER" => Self::InvalidParameter,
+            "NO_AUTH" | "SIGN_ERROR" | "INVALID_SIGN" | "PERMISSION_DENIED" | "AUTH_ERROR"
+            | "INVALID_CREDENTIAL" => Self::Authentication,
+            "SIGNATURE_ERROR" | "VERIFY_SIGNATURE_ERROR" => Self::Signature,
+            "ORDER_NOT_EXIST" | "NOT_FOUND" | "RESOURCE_NOT_FOUND" => Self::ResourceNotFound,
+            "FREQ_LIMIT" | "RATE_LIMIT" | "V2_API_DISABLED" => Self::RateLimited,
+            "NO_AUTHORITY" | "NOT_PERMIT" | "ILLEGAL_REQUEST" => Self::BusinessBlocked,
+            "SYSTEM_ERROR" | "SERVICE_UNAVAILABLE" => Self::Internal,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<WxPayErrorKind> for WxPayAlertLevel {
+    fn from(kind: WxPayErrorKind) -> Self {
+        match kind {
+            WxPayErrorKind::Authentication | WxPayErrorKind::Signature => Self::Critical,
+            WxPayErrorKind::RateLimited | WxPayErrorKind::BusinessBlocked => Self::High,
+            WxPayErrorKind::Internal => Self::High,
+            WxPayErrorKind::ResourceNotFound => Self::Medium,
+            WxPayErrorKind::InvalidParameter | WxPayErrorKind::Unknown => Self::Low,
+        }
+    }
+}
 
 /// 微信支付 SDK 错误类型
 #[derive(Error, Debug)]
@@ -164,6 +254,8 @@ pub struct ErrorResponse {
     pub code: String,
     /// 错误信息
     pub message: String,
+    /// 透传错误明细
+    pub detail: Option<Value>,
 }
 
 impl WxPayError {
@@ -234,6 +326,96 @@ impl WxPayError {
         Self::BusinessError(message.into())
     }
 
+    /// 获取 API 错误分类
+    pub fn api_kind(&self) -> Option<WxPayErrorKind> {
+        match self {
+            Self::ApiError { code, .. } => Some(WxPayErrorKind::from_code(code)),
+            _ => None,
+        }
+    }
+
+    /// 获取 API 错误码
+    pub fn api_code(&self) -> Option<&str> {
+        match self {
+            Self::ApiError { code, .. } => Some(code.as_str()),
+            _ => None,
+        }
+    }
+
+    /// 告警级别（用于结构化日志告警策略）
+    pub fn alert_level(&self) -> WxPayAlertLevel {
+        match self {
+            Self::NetworkError(_) | Self::Timeout => WxPayAlertLevel::Critical,
+            Self::ApiError { code, .. } => WxPayErrorKind::from_code(code).into(),
+            Self::CertificateExpired
+            | Self::CertificateVerificationError(_)
+            | Self::CertificateDownloadError(_)
+            | Self::CertificateNotFound(_)
+            | Self::CertificateParseError(_)
+            | Self::SignatureVerificationFailed => WxPayAlertLevel::High,
+            Self::UnexpectedStatusCode(status) => {
+                if *status >= 500 {
+                    WxPayAlertLevel::High
+                } else {
+                    WxPayAlertLevel::Medium
+                }
+            }
+            Self::SignError(_)
+            | Self::InvalidSignatureFormat(_)
+            | Self::RequestBuildError(_)
+            | Self::ResponseParseError(_)
+            | Self::JsonError(_)
+            | Self::BusinessError(_) => WxPayAlertLevel::High,
+            Self::InternalError(_) | Self::EncryptionError(_) | Self::DecryptionError(_) => {
+                WxPayAlertLevel::Medium
+            }
+            _ => WxPayAlertLevel::Low,
+        }
+    }
+
+    /// 告警策略键（用于指标/告警策略路由）
+    pub fn alert_policy(&self) -> &'static str {
+        match self {
+            Self::ApiError { code, .. } => match WxPayErrorKind::from_code(code) {
+                WxPayErrorKind::Authentication => "security.auth",
+                WxPayErrorKind::Signature => "security.signature",
+                WxPayErrorKind::RateLimited => "business.ratelimit",
+                WxPayErrorKind::ResourceNotFound => "business.notfound",
+                WxPayErrorKind::BusinessBlocked => "business.blocked",
+                WxPayErrorKind::InvalidParameter => "params.invalid",
+                WxPayErrorKind::Internal => "system.internal",
+                WxPayErrorKind::Unknown => "unknown",
+            },
+            Self::NetworkError(_) | Self::Timeout => "network",
+            Self::SignatureVerificationFailed
+            | Self::SignError(_)
+            | Self::InvalidSignatureFormat(_) => "security.signature",
+            Self::CertificateExpired
+            | Self::CertificateVerificationError(_)
+            | Self::CertificateParseError(_)
+            | Self::CertificateDownloadError(_)
+            | Self::CertificateNotFound(_) => "certificate",
+            Self::UnexpectedStatusCode(status) if *status >= 500 => "system.internal",
+            Self::UnexpectedStatusCode(status) if *status >= 400 => "business.http",
+            Self::UnexpectedStatusCode(_) => "business.http",
+            Self::InternalError(_) => "system.internal",
+            _ => "unknown",
+        }
+    }
+
+    /// 是否建议重试
+    pub fn should_retry(&self) -> bool {
+        match self {
+            Self::NetworkError(_) | Self::Timeout => true,
+            Self::UnexpectedStatusCode(status) if *status >= 500 => true,
+            Self::ApiError { code, .. } => matches!(
+                WxPayErrorKind::from_code(code),
+                WxPayErrorKind::RateLimited | WxPayErrorKind::Internal
+            ),
+            _ => false,
+        }
+    }
+
     /// 判断是否为网络错误
     pub fn is_network_error(&self) -> bool {
         matches!(self, Self::NetworkError(_) | Self::Timeout)
@@ -244,11 +426,21 @@ impl WxPayError {
         matches!(self, Self::ApiError { .. })
     }
 
+    /// 判断是否为鉴权相关错误
+    pub fn is_auth_error(&self) -> bool {
+        matches!(
+            self.api_kind(),
+            Some(WxPayErrorKind::Authentication | WxPayErrorKind::Signature)
+        )
+    }
+
     /// 判断是否为签名/验签错误
     pub fn is_signature_error(&self) -> bool {
         matches!(
             self,
-            Self::SignError(_) | Self::SignatureVerificationFailed | Self::InvalidSignatureFormat(_)
+            Self::SignError(_)
+                | Self::SignatureVerificationFailed
+                | Self::InvalidSignatureFormat(_)
         )
     }
 
@@ -310,7 +502,10 @@ mod tests {
         assert_eq!(err.to_string(), "配置错误：missing app_id");
 
         let err = WxPayError::api("PARAM_ERROR", "参数错误");
-        assert_eq!(err.to_string(), "API 错误：code=PARAM_ERROR, message=参数错误");
+        assert_eq!(
+            err.to_string(),
+            "API 错误：code=PARAM_ERROR, message=参数错误"
+        );
     }
 
     #[test]
@@ -318,13 +513,18 @@ mod tests {
         let err = WxPayError::Timeout;
         assert!(err.is_network_error());
         assert!(!err.is_api_error());
+        assert!(matches!(err.alert_level(), WxPayAlertLevel::Critical));
+        assert_eq!(err.alert_policy(), "network");
+        assert!(err.should_retry());
 
         let err = WxPayError::api("ERROR", "msg");
         assert!(err.is_api_error());
         assert!(!err.is_network_error());
+        assert_eq!(err.alert_policy(), "unknown");
 
         let err = WxPayError::SignatureVerificationFailed;
         assert!(err.is_signature_error());
+        assert_eq!(err.alert_policy(), "security.signature");
 
         let err = WxPayError::CertificateExpired;
         assert!(err.is_certificate_error());

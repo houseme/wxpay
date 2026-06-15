@@ -3,12 +3,12 @@
 //! 提供响应签名验证功能。
 
 use async_trait::async_trait;
-use rsa::pkcs1::DecodeRsaPublicKey;
-use rsa::pkcs8::DecodePublicKey;
-use rsa::{RsaPublicKey, Pkcs1v15Sign};
-use sha2::{Sha256, Digest};
-use x509_cert::Certificate;
 use base64::Engine;
+use der::Encode;
+use rsa::pkcs8::DecodePublicKey;
+use rsa::{Pkcs1v15Sign, RsaPublicKey};
+use sha2::{Digest, Sha256};
+use x509_cert::Certificate;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -55,17 +55,17 @@ pub trait Verifier: Send + Sync {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::auth::Sha256RsaVerifier;
+/// use wxpay_rs::auth::{Verifier, Sha256RsaVerifier};
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let cert_pem = std::fs::read_to_string("path/to/platform_cert.pem")?;
-/// let verifier = Sha256RsaVerifier::new(vec![cert_pem.as_bytes().to_vec()])?;
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let cert_pem = std::fs::read_to_string("path/to/platform_cert.pem")?;
+///     let verifier = Sha256RsaVerifier::new(vec![cert_pem.as_bytes().to_vec()])?;
 ///
-/// let result = tokio::runtime::Runtime::new()?.block_on(
-///     verifier.verify("test message", "dGVzdF9zaWduYXR1cmU=")
-/// )?;
-/// # Ok(())
-/// # }
+///     let result = verifier.verify("test message", "dGVzdF9zaWduYXR1cmU=").await?;
+///     let _ = result;
+///     Ok(())
+/// }
 /// ```
 pub struct Sha256RsaVerifier {
     /// 证书列表（序列号 -> 公钥）
@@ -100,15 +100,14 @@ impl Sha256RsaVerifier {
     /// 解析证书
     fn parse_certificate(der: &[u8]) -> WxPayResult<Certificate> {
         use der::Decode;
-        Certificate::from_der(der).map_err(|e| {
-            WxPayError::CertificateParseError(format!("证书解析失败：{}", e))
-        })
+        Certificate::from_der(der)
+            .map_err(|e| WxPayError::CertificateParseError(format!("证书解析失败：{}", e)))
     }
 
     /// 提取证书序列号
     fn extract_serial_number(cert: &Certificate) -> WxPayResult<String> {
         // 使用证书的序列号
-        let serial = &cert.tbs_certificate.serial_number;
+        let serial = &cert.tbs_certificate().serial_number();
         let bytes = serial.as_bytes();
         Ok(hex::encode(bytes))
     }
@@ -116,12 +115,13 @@ impl Sha256RsaVerifier {
     /// 提取公钥
     fn extract_public_key(cert: &Certificate) -> WxPayResult<RsaPublicKey> {
         // 从证书中提取公钥
-        use spki::OwnedToRef;
-        let spki = &cert.tbs_certificate.subject_public_key_info;
-        let spki_ref = spki.to_ref();
-        let public_key = RsaPublicKey::try_from(spki_ref).map_err(|e| {
-            WxPayError::CertificateParseError(format!("提取公钥失败：{}", e))
-        })?;
+        let spki = cert.tbs_certificate().subject_public_key_info();
+        let spki_der = spki
+            .to_der()
+            .map_err(|e| WxPayError::CertificateParseError(format!("提取证书 SPKI 失败：{}", e)))?;
+
+        let public_key = RsaPublicKey::from_public_key_der(&spki_der)
+            .map_err(|e| WxPayError::CertificateParseError(format!("提取公钥失败：{}", e)))?;
         Ok(public_key)
     }
 
@@ -150,11 +150,7 @@ impl Sha256RsaVerifier {
             .map_err(|e| WxPayError::InvalidSignatureFormat(format!("Base64 解码失败：{}", e)))?;
 
         // 验证签名
-        match public_key.verify(
-            Pkcs1v15Sign::new::<Sha256>(),
-            &hash,
-            &signature_bytes,
-        ) {
+        match public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &hash, &signature_bytes) {
             Ok(()) => Ok(true),
             Err(_) => Ok(false),
         }
@@ -183,9 +179,7 @@ impl Verifier for Sha256RsaVerifier {
             .certificates
             .iter()
             .find(|(serial, _)| serial == serial_number)
-            .ok_or_else(|| {
-                WxPayError::CertificateNotFound(serial_number.to_string())
-            })?;
+            .ok_or_else(|| WxPayError::CertificateNotFound(serial_number.to_string()))?;
 
         Self::verify_signature(public_key, message, signature)
     }

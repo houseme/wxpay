@@ -3,9 +3,11 @@
 //! 提供基于 Reqwest 的 HTTP 客户端封装。
 
 use std::time::Duration;
+
 use async_trait::async_trait;
+use rand::{RngExt, rng};
 use reqwest::Client;
-use serde::Serialize;
+use tokio::time::sleep;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -34,11 +36,7 @@ pub trait HttpClient: Send + Sync {
     ) -> WxPayResult<HttpResponse>;
 
     /// 发送 DELETE 请求
-    async fn delete(
-        &self,
-        url: &str,
-        headers: Vec<(String, String)>,
-    ) -> WxPayResult<HttpResponse>;
+    async fn delete(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse>;
 
     /// 发送 PATCH 请求
     async fn patch(
@@ -105,12 +103,96 @@ impl HttpResponse {
 pub struct ReqwestHttpClient {
     /// Reqwest 客户端
     client: Client,
+
+    /// 最大重试次数
+    max_retries: u32,
 }
 
 impl ReqwestHttpClient {
     /// 创建 HTTP 客户端构建器
     pub fn builder() -> ReqwestHttpClientBuilder {
         ReqwestHttpClientBuilder::new()
+    }
+
+    fn is_retriable_status(status: u16) -> bool {
+        status == 429 || (500..=599).contains(&status)
+    }
+
+    fn retry_delay_ms(retry_count: u32) -> u64 {
+        let base = 40_u64.saturating_mul(1_u64 << retry_count.min(8));
+        let jitter = rng().random_range(0..=base / 2);
+        base.saturating_add(jitter)
+    }
+
+    async fn read_response(response: reqwest::Response) -> WxPayResult<HttpResponse> {
+        let status = response.status().as_u16();
+        let response_headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
+
+        Ok(HttpResponse::new(status, response_headers, body))
+    }
+
+    async fn execute_with_retries<F>(
+        &self,
+        mut request_factory: F,
+        retry_on_error: bool,
+    ) -> WxPayResult<HttpResponse>
+    where
+        F: FnMut() -> reqwest::RequestBuilder,
+    {
+        for attempt in 0..=self.max_retries {
+            let response = request_factory().send().await;
+
+            match response {
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let response = Self::read_response(response).await?;
+
+                    if retry_on_error
+                        && Self::is_retriable_status(status)
+                        && attempt < self.max_retries
+                    {
+                        let delay = Duration::from_millis(Self::retry_delay_ms(attempt + 1));
+                        sleep(delay).await;
+                        continue;
+                    }
+
+                    return Ok(response);
+                }
+                Err(error) => {
+                    if retry_on_error && attempt < self.max_retries {
+                        let delay = Duration::from_millis(Self::retry_delay_ms(attempt + 1));
+                        sleep(delay).await;
+                        continue;
+                    }
+
+                    return Err(WxPayError::NetworkError(error));
+                }
+            }
+        }
+
+        Err(WxPayError::Timeout)
+    }
+
+    fn append_headers(
+        request: reqwest::RequestBuilder,
+        headers: &[(String, String)],
+    ) -> reqwest::RequestBuilder {
+        let mut request = request;
+
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+
+        request
     }
 }
 
@@ -120,6 +202,7 @@ pub struct ReqwestHttpClientBuilder {
     timeout: u64,
     max_idle_connections: usize,
     idle_timeout: u64,
+    max_retries: u32,
 }
 
 impl ReqwestHttpClientBuilder {
@@ -129,6 +212,7 @@ impl ReqwestHttpClientBuilder {
             timeout: 30,
             max_idle_connections: 100,
             idle_timeout: 90,
+            max_retries: 3,
         }
     }
 
@@ -150,6 +234,12 @@ impl ReqwestHttpClientBuilder {
         self
     }
 
+    /// 设置请求最大重试次数（重试 5xx、429 与网络错误）
+    pub fn max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
     /// 构建 HTTP 客户端
     pub fn build(self) -> WxPayResult<ReqwestHttpClient> {
         let client = Client::builder()
@@ -159,7 +249,10 @@ impl ReqwestHttpClientBuilder {
             .build()
             .map_err(|e| WxPayError::InternalError(format!("创建 HTTP 客户端失败：{}", e)))?;
 
-        Ok(ReqwestHttpClient { client })
+        Ok(ReqwestHttpClient {
+            client,
+            max_retries: self.max_retries,
+        })
     }
 }
 
@@ -172,30 +265,14 @@ impl Default for ReqwestHttpClientBuilder {
 #[async_trait]
 impl HttpClient for ReqwestHttpClient {
     async fn get(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse> {
-        let mut request = self.client.get(url);
-
-        for (name, value) in headers {
-            request = request.header(&name, &value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(WxPayError::NetworkError)?;
-
-        let status = response.status().as_u16();
-        let response_headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
-
-        Ok(HttpResponse::new(status, response_headers, body))
+        self.execute_with_retries(
+            || {
+                let request = self.client.get(url);
+                Self::append_headers(request, &headers)
+            },
+            true,
+        )
+        .await
     }
 
     async fn post(
@@ -204,31 +281,16 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let mut request = self.client.post(url);
+        let body = body.to_string();
 
-        for (name, value) in headers {
-            request = request.header(&name, &value);
-        }
-
-        let response = request
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(WxPayError::NetworkError)?;
-
-        let status = response.status().as_u16();
-        let response_headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
-
-        Ok(HttpResponse::new(status, response_headers, body))
+        self.execute_with_retries(
+            move || {
+                let request = self.client.post(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
+        .await
     }
 
     async fn put(
@@ -237,62 +299,27 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let mut request = self.client.put(url);
+        let body = body.to_string();
 
-        for (name, value) in headers {
-            request = request.header(&name, &value);
-        }
-
-        let response = request
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(WxPayError::NetworkError)?;
-
-        let status = response.status().as_u16();
-        let response_headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
-
-        Ok(HttpResponse::new(status, response_headers, body))
+        self.execute_with_retries(
+            move || {
+                let request = self.client.put(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
+        .await
     }
 
-    async fn delete(
-        &self,
-        url: &str,
-        headers: Vec<(String, String)>,
-    ) -> WxPayResult<HttpResponse> {
-        let mut request = self.client.delete(url);
-
-        for (name, value) in headers {
-            request = request.header(&name, &value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(WxPayError::NetworkError)?;
-
-        let status = response.status().as_u16();
-        let response_headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
-
-        Ok(HttpResponse::new(status, response_headers, body))
+    async fn delete(&self, url: &str, headers: Vec<(String, String)>) -> WxPayResult<HttpResponse> {
+        self.execute_with_retries(
+            || {
+                let request = self.client.delete(url);
+                Self::append_headers(request, &headers)
+            },
+            true,
+        )
+        .await
     }
 
     async fn patch(
@@ -301,31 +328,16 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let mut request = self.client.patch(url);
+        let body = body.to_string();
 
-        for (name, value) in headers {
-            request = request.header(&name, &value);
-        }
-
-        let response = request
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(WxPayError::NetworkError)?;
-
-        let status = response.status().as_u16();
-        let response_headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
-
-        Ok(HttpResponse::new(status, response_headers, body))
+        self.execute_with_retries(
+            move || {
+                let request = self.client.patch(url).body(body.clone());
+                Self::append_headers(request, &headers)
+            },
+            false,
+        )
+        .await
     }
 }
 
@@ -362,11 +374,7 @@ mod tests {
 
     #[test]
     fn test_http_response_not_success() {
-        let response = HttpResponse::new(
-            400,
-            vec![],
-            r#"{"code":"PARAM_ERROR"}"#.to_string(),
-        );
+        let response = HttpResponse::new(400, vec![], r#"{"code":"PARAM_ERROR"}"#.to_string());
 
         assert!(!response.is_success());
     }
@@ -376,11 +384,13 @@ mod tests {
         let builder = ReqwestHttpClientBuilder::new()
             .timeout(60)
             .max_idle_connections(50)
-            .idle_timeout(120);
+            .idle_timeout(120)
+            .max_retries(3);
 
         assert_eq!(builder.timeout, 60);
         assert_eq!(builder.max_idle_connections, 50);
         assert_eq!(builder.idle_timeout, 120);
+        assert_eq!(builder.max_retries, 3);
     }
 
     #[test]
@@ -389,5 +399,6 @@ mod tests {
         assert_eq!(builder.timeout, 30);
         assert_eq!(builder.max_idle_connections, 100);
         assert_eq!(builder.idle_timeout, 90);
+        assert_eq!(builder.max_retries, 3);
     }
 }

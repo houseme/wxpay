@@ -2,13 +2,14 @@
 //!
 //! 提供微信支付转账功能。
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
-use crate::http::HttpClient;
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
+use crate::error::WxPayResult;
+use crate::http::{HttpClient, HttpMethod};
+use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 转账请求
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +68,13 @@ pub struct TransferResponse {
     pub batch_status: String,
 }
 
+/// 查询转账批次请求
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryTransferBatchRequest {
+    /// 商户批次单号
+    pub out_batch_no: String,
+}
+
 /// 转账服务
 ///
 /// 提供微信支付转账的创建、查询等功能。
@@ -74,31 +82,53 @@ pub struct TransferResponse {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::services::TransferService;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let service = TransferService::new(config, http_client, signer);
-///
-/// let request = TransferRequest {
-///     appid: "wx88888888".to_string(),
-///     out_batch_no: "batch_001".to_string(),
-///     batch_name: "测试转账".to_string(),
-///     batch_remark: "测试".to_string(),
-///     transfer_detail_list: vec![TransferDetail {
-///         out_detail_no: "detail_001".to_string(),
-///         transfer_amount: 100,
-///         transfer_remark: "转账".to_string(),
-///         openid: "test_openid".to_string(),
-///         user_name: None,
-///     }],
-///     total_amount: 100,
-///     total_num: 1,
+/// use wxpay_rs::{
+///     auth::{Signer, Sha256RsaSigner},
+///     config::WxPayConfig,
+///     http::ReqwestHttpClient,
+///     services::TransferService,
 /// };
 ///
-/// let response = tokio::runtime::Runtime::new()?.block_on(service.create_transfer(&request))?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///     let http_client = Arc::new(ReqwestHttpClient::builder().build()?);
+///     let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
+///         "1900000109",
+///         b"PRIVATE KEY",
+///         "CERT123456",
+///     )?);
+///     let service = TransferService::new(Arc::new(config), http_client, signer);
+///
+///     let request = wxpay_rs::services::transfer::TransferRequest {
+///         appid: "wx88888888".to_string(),
+///         out_batch_no: "batch_001".to_string(),
+///         batch_name: "测试转账".to_string(),
+///         batch_remark: "测试".to_string(),
+///         transfer_detail_list: vec![wxpay_rs::services::transfer::TransferDetail {
+///             out_detail_no: "detail_001".to_string(),
+///             transfer_amount: 100,
+///             transfer_remark: "转账".to_string(),
+///             openid: "test_openid".to_string(),
+///             user_name: None,
+///         }],
+///         total_amount: 100,
+///         total_num: 1,
+///     };
+///     let response = service.create_transfer(&request).await?;
+///     let _ = response;
+///     Ok(())
+/// }
 /// ```
+#[allow(dead_code)]
 pub struct TransferService {
     /// 配置
     config: Arc<WxPayConfig>,
@@ -108,6 +138,9 @@ pub struct TransferService {
 
     /// 签名器
     signer: Arc<dyn Signer>,
+
+    /// 统一请求执行器
+    transport: ServiceTransport,
 }
 
 impl TransferService {
@@ -117,102 +150,93 @@ impl TransferService {
         http_client: Arc<dyn HttpClient>,
         signer: Arc<dyn Signer>,
     ) -> Self {
+        Self::new_with_observer(config.clone(), http_client.clone(), signer.clone(), None)
+    }
+
+    pub fn new_with_observer(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport_observer: Option<Arc<dyn TransportObserver>>,
+    ) -> Self {
         Self {
-            config,
-            http_client,
-            signer,
+            config: config.clone(),
+            http_client: http_client.clone(),
+            signer: signer.clone(),
+            transport: ServiceTransport::new_with_observer(
+                config,
+                http_client,
+                signer,
+                transport_observer,
+            ),
         }
     }
 
     /// 创建转账
-    pub async fn create_transfer(&self, request: &TransferRequest) -> WxPayResult<TransferResponse> {
-        let url = format!("{}/v3/transfer/batches", self.config.base_url());
-
-        // 序列化请求体
+    pub async fn create_transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> WxPayResult<TransferResponse> {
         let body = serde_json::to_string(request)?;
 
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
-        let message = format!("POST\n/v3/transfer/batches\n{}\n{}\n{}\n", timestamp, nonce, body);
+        self.transport
+            .request(
+                HttpMethod::Post,
+                "/v3/transfer/batches",
+                Some(&body),
+                "transfer.create_transfer",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+    /// 发起批量转账（文档风格）
+    pub async fn create(&self, request: &TransferRequest) -> WxPayResult<TransferResponse> {
+        self.create_transfer(request).await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
-
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.post(&url, headers, &body).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let transfer_response: TransferResponse = serde_json::from_str(&response.body)?;
-
-        Ok(transfer_response)
+    /// 发起批量转账（兼容 `wechatpay-go` 风格）
+    pub async fn initiate_batch_transfer(
+        &self,
+        request: &TransferRequest,
+    ) -> WxPayResult<TransferResponse> {
+        self.create_transfer(request).await
     }
 
     /// 查询转账批次
     pub async fn query_transfer_batch(&self, batch_id: &str) -> WxPayResult<TransferResponse> {
-        let url = format!(
-            "{}/v3/transfer/batches/{}",
-            self.config.base_url(),
-            batch_id
-        );
-
-        // 构建签名消息
-        let timestamp = crate::utils::timestamp::get_timestamp();
-        let nonce = crate::utils::nonce::generate_nonce();
         let path = format!("/v3/transfer/batches/{}", batch_id);
-        let message = format!("GET\n{}\n{}\n{}\n\n", path, timestamp, nonce);
+        self.transport
+            .request(
+                HttpMethod::Get,
+                &path,
+                None,
+                "transfer.query_transfer_batch",
+            )
+            .await
+    }
 
-        // 生成签名
-        let signature = self.signer.sign(&message).await?;
+    /// 查询转账批次（文档风格）
+    pub async fn query_batch(
+        &self,
+        request: &QueryTransferBatchRequest,
+    ) -> WxPayResult<TransferResponse> {
+        self.query_transfer_batch(&request.out_batch_no).await
+    }
 
-        // 构建请求头
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.config.merchant_id, nonce, timestamp, self.config.cert_serial_number, signature
-        );
+    /// 查询转账（文档/API 表格简化命名）
+    pub async fn query(
+        &self,
+        request: &QueryTransferBatchRequest,
+    ) -> WxPayResult<TransferResponse> {
+        self.query_batch(request).await
+    }
 
-        let headers = vec![
-            ("Authorization".to_string(), authorization),
-            ("Accept".to_string(), "application/json".to_string()),
-            ("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()),
-        ];
-
-        // 发送请求
-        let response = self.http_client.get(&url, headers).await?;
-
-        // 检查响应状态
-        if !response.is_success() {
-            let error: serde_json::Value = serde_json::from_str(&response.body)?;
-            let code = error.get("code").and_then(|c| c.as_str()).unwrap_or("UNKNOWN");
-            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("未知错误");
-            return Err(WxPayError::api(code, message));
-        }
-
-        // 解析响应
-        let transfer_response: TransferResponse = serde_json::from_str(&response.body)?;
-
-        Ok(transfer_response)
+    /// 按商户批次单号查询转账批次（兼容 `wechatpay-go` 风格）
+    pub async fn get_transfer_batch_by_out_batch_no(
+        &self,
+        out_batch_no: &str,
+    ) -> WxPayResult<TransferResponse> {
+        self.query_transfer_batch(out_batch_no).await
     }
 }
 
@@ -258,6 +282,9 @@ mod tests {
         }"#;
         let response: TransferResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.batch_status, "ACCEPT");
-        assert_eq!(response.batch_id, "1030000071100999991182020050700019480101");
+        assert_eq!(
+            response.batch_id,
+            "1030000071100999991182020050700019480101"
+        );
     }
 }

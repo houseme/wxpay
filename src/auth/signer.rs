@@ -3,11 +3,11 @@
 //! 提供请求签名功能，使用 SHA256-RSA 算法。
 
 use async_trait::async_trait;
+use base64::Engine;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
-use rsa::{RsaPrivateKey, Pkcs1v15Sign};
-use sha2::{Sha256, Digest};
-use base64::Engine;
+use rsa::{Pkcs1v15Sign, RsaPrivateKey};
+use sha2::{Digest, Sha256};
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -41,9 +41,10 @@ pub trait Signer: Send + Sync {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::auth::Sha256RsaSigner;
+/// use wxpay_rs::auth::{Signer, Sha256RsaSigner};
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let private_key_pem = std::fs::read_to_string("path/to/private_key.pem")?;
 /// let signer = Sha256RsaSigner::new(
 ///     "1900000109",
@@ -51,7 +52,7 @@ pub trait Signer: Send + Sync {
 ///     "CERT123456",
 /// )?;
 ///
-/// let signature = tokio::runtime::Runtime::new()?.block_on(signer.sign("test message"))?;
+/// let signature = signer.sign("test message").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -148,10 +149,10 @@ impl Signer for Sha256RsaSigner {
         let hash = hasher.finalize();
 
         // 使用 RSA PKCS1v15 签名
-        let signature = self.private_key.sign(
-            Pkcs1v15Sign::new::<Sha256>(),
-            &hash,
-        ).map_err(|e| WxPayError::SignError(format!("RSA 签名失败: {}", e)))?;
+        let signature = self
+            .private_key
+            .sign(Pkcs1v15Sign::new::<Sha256>(), &hash)
+            .map_err(|e| WxPayError::SignError(format!("RSA 签名失败: {}", e)))?;
 
         // Base64 编码
         Ok(base64::engine::general_purpose::STANDARD.encode(&signature))
@@ -178,13 +179,6 @@ impl std::fmt::Debug for Sha256RsaSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // 测试用的 PKCS#8 私钥（仅用于测试，不是真实密钥）
-    const TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKB
-wUIiN+3WGrCCZLomSjHzLMNOmNQ4sM/2zRnB+jTVJDJXbNGQPVUBQGY1T5RkxEVp
-S7sFnAPBKXCIIw==（此处省略完整密钥）
------END PRIVATE KEY-----"#;
 
     #[test]
     fn test_build_sign_message() {

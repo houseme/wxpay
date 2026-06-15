@@ -2,15 +2,50 @@
 //!
 //! 提供从微信支付 API 下载平台证书的功能。
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
-use crate::http::HttpClient;
 use crate::auth::Signer;
 use crate::cert::CertManager;
+use crate::crypto::Aes256GcmCipher;
+use crate::error::{WxPayError, WxPayResult};
+use crate::http::HttpClient;
 use crate::utils::nonce::generate_nonce;
 use crate::utils::timestamp::get_timestamp;
+use serde::Deserialize;
+
+use base64::Engine;
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct EncryptedCertificate {
+    #[serde(default)]
+    algorithm: String,
+
+    #[serde(default)]
+    associated_data: String,
+
+    nonce: String,
+
+    ciphertext: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CertificateEntry {
+    serial_no: String,
+
+    #[serde(default)]
+    _effective_time: Option<String>,
+
+    #[serde(default)]
+    _expire_time: Option<String>,
+
+    #[serde(default)]
+    certificate: Option<String>,
+
+    #[serde(default)]
+    encrypt_certificate: Option<EncryptedCertificate>,
+}
 
 /// 证书下载器 trait
 ///
@@ -32,20 +67,46 @@ pub trait CertificateDownloader: Send + Sync {
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::cert::CertDownloader;
+/// use std::sync::Arc;
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let downloader = CertDownloader::new(
-///     "https://api.mch.weixin.qq.com",
-///     "1900000109",
-///     signer,
-///     http_client,
-///     cert_manager,
-/// );
+/// use wxpay_rs::{
+///     auth::{Signer, Sha256RsaSigner},
+///     cert::{CertDownloader, CertManager},
+///     cert::downloader::CertificateDownloader,
+///     config::WxPayConfig,
+///     http::ReqwestHttpClient,
+/// };
 ///
-/// let certificates = tokio::runtime::Runtime::new()?.block_on(downloader.download())?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let _config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///
+///     let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
+///         "1900000109",
+///         b"PRIVATE KEY",
+///         "CERT123456",
+///     )?);
+///     let http_client = Arc::new(ReqwestHttpClient::builder().build()?);
+///     let cert_manager = Arc::new(CertManager::new());
+///
+///     let downloader = CertDownloader::new(
+///         "https://api.mch.weixin.qq.com",
+///         "1900000109",
+///         signer,
+///         http_client,
+///         cert_manager,
+///     );
+///
+///     let certificates = downloader.download().await?;
+///     let _ = certificates;
+///     Ok(())
+/// }
 /// ```
 pub struct CertDownloader {
     /// API 基础 URL
@@ -62,6 +123,9 @@ pub struct CertDownloader {
 
     /// 证书管理器
     cert_manager: Arc<CertManager>,
+
+    /// APIv3 秘钥
+    api_v3_key: Option<String>,
 }
 
 impl CertDownloader {
@@ -91,7 +155,14 @@ impl CertDownloader {
             signer,
             http_client,
             cert_manager,
+            api_v3_key: None,
         }
+    }
+
+    /// 配置 APIv3 密钥（用于解密加密证书）
+    pub fn with_api_v3_key(mut self, api_v3_key: impl Into<String>) -> Self {
+        self.api_v3_key = Some(api_v3_key.into());
+        self
     }
 
     /// 构建下载证书的请求 URL
@@ -115,7 +186,11 @@ impl CertDownloader {
         // 构建 Authorization header
         let authorization = format!(
             r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            self.merchant_id, nonce, timestamp, self.signer.cert_serial_number(), signature
+            self.merchant_id,
+            nonce,
+            timestamp,
+            self.signer.cert_serial_number(),
+            signature
         );
 
         Ok(vec![
@@ -145,39 +220,82 @@ impl CertificateDownloader for CertDownloader {
 
         // 解析响应
         let body = &response.body;
-        let certificates: serde_json::Value = serde_json::from_str(body)?;
+
+        let response: serde_json::Value = serde_json::from_str(body)?;
+        let mut items: Vec<CertificateEntry> =
+            serde_json::from_value(response.clone()).or_else(|_| {
+                response
+                    .get("data")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .ok_or_else(|| {
+                        WxPayError::CertificateParseError("证书响应解析失败".to_string())
+                    })
+            })?;
+
+        if items.is_empty()
+            && let Some(certs) = response.get("data").and_then(|v| v.as_array())
+        {
+            items = certs
+                .iter()
+                .filter_map(|item| serde_json::from_value::<CertificateEntry>(item.clone()).ok())
+                .collect();
+        }
 
         let mut result = Vec::new();
 
-        if let Some(certs) = certificates.as_array() {
-            for cert in certs {
-                if let (Some(serial), Some(cert_data)) = (
-                    cert.get("serial_no").and_then(|s| s.as_str()),
-                    cert.get("certificate").and_then(|c| c.as_str()),
-                ) {
-                    // 解码证书数据
-                    use base64::Engine;
-                    let cert_der = base64::engine::general_purpose::STANDARD
-                        .decode(cert_data)
-                        .map_err(|e| {
-                            WxPayError::CertificateParseError(format!(
-                                "证书 Base64 解码失败: {}",
-                                e
-                            ))
-                        })?;
+        for item in items {
+            let serial = item.serial_no.clone();
+            let cert_der = if let Some(cert_data) = item.certificate {
+                decode_certificate_der(&cert_data)?
+            } else if let Some(encrypted) = item.encrypt_certificate {
+                let cipher =
+                    Aes256GcmCipher::new(self.api_v3_key.as_deref().ok_or_else(|| {
+                        WxPayError::CertificateParseError("加密证书缺少 API v3 Key".to_string())
+                    })?)?;
 
-                    // 添加到证书管理器
-                    self.cert_manager
-                        .add_certificate(serial.to_string(), cert_der.clone())
-                        .await?;
+                let plaintext = cipher.decrypt_notification(
+                    &encrypted.nonce,
+                    &encrypted.ciphertext,
+                    &encrypted.associated_data,
+                )?;
 
-                    result.push((serial.to_string(), cert_der));
-                }
-            }
+                decode_certificate_der(&plaintext)?
+            } else {
+                return Err(WxPayError::CertificateParseError(format!(
+                    "证书 {} 无 certificate/ encrypt_certificate 字段",
+                    item.serial_no
+                )));
+            };
+
+            self.cert_manager
+                .add_certificate(serial.to_string(), cert_der.clone())
+                .await?;
+
+            result.push((serial.to_string(), cert_der));
         }
 
         Ok(result)
     }
+}
+
+fn decode_certificate_der(certificate_data: &str) -> WxPayResult<Vec<u8>> {
+    let trimmed = certificate_data.trim();
+
+    if trimmed.contains("BEGIN CERTIFICATE") {
+        let body = trimmed
+            .lines()
+            .filter(|line| !line.starts_with("-----"))
+            .collect::<String>();
+
+        return base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .map_err(|e| WxPayError::CertificateParseError(format!("证书 PEM 解码失败：{}", e)));
+    }
+
+    base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .map_err(|e| WxPayError::CertificateParseError(format!("证书 Base64 解码失败: {}", e)))
 }
 
 impl std::fmt::Debug for CertDownloader {
@@ -212,7 +330,10 @@ impl CertRefresher {
     ///
     /// 返回证书刷新器实例
     pub fn new(downloader: Arc<CertDownloader>, interval: u64) -> Self {
-        Self { downloader, interval }
+        Self {
+            downloader,
+            interval,
+        }
     }
 
     /// 启动自动刷新
@@ -251,8 +372,6 @@ impl std::fmt::Debug for CertRefresher {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_cert_downloader_build_url() {
         // 这个测试需要实际的依赖，跳过

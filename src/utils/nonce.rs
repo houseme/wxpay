@@ -2,7 +2,7 @@
 //!
 //! 提供生成随机 Nonce 的功能，用于请求签名。
 
-use rand::Rng;
+use rand::RngExt;
 use uuid::Uuid;
 
 /// 生成随机 Nonce 字符串
@@ -38,12 +38,12 @@ pub fn generate_nonce() -> String {
 /// assert_eq!(s.len(), 16);
 /// ```
 pub fn generate_random_string(length: usize) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
 
     (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..chars.len());
+            let idx = rng.random_range(0..chars.len());
             chars[idx]
         })
         .collect()
@@ -67,11 +67,11 @@ pub fn generate_random_string(length: usize) -> String {
 /// assert!(s.chars().all(|c| c.is_ascii_digit()));
 /// ```
 pub fn generate_numeric_string(length: usize) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     (0..length)
         .map(|_| {
-            let digit = rng.gen_range(0..10);
+            let digit = rng.random_range(0..10);
             char::from(b'0' + digit)
         })
         .collect()
@@ -107,7 +107,10 @@ mod tests {
         assert_ne!(s1, s2);
 
         // 应该只包含小写字母和数字
-        assert!(s1.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(
+            s1.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]

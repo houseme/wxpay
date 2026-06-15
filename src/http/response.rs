@@ -3,8 +3,9 @@
 //! 提供处理微信支付 API 响应的功能。
 
 use serde::Deserialize;
+use serde_json::Value;
 
-use crate::error::{WxPayError, WxPayResult, ErrorResponse};
+use crate::error::{ErrorResponse, WxPayError, WxPayResult};
 use crate::http::client::HttpResponse;
 
 /// 响应处理器
@@ -31,6 +32,50 @@ impl ResponseHandler {
         }
     }
 
+    fn extract_error_payload(response: &HttpResponse) -> Option<(String, String)> {
+        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&response.body) {
+            return Some((error.code, error.message));
+        }
+
+        let value: Value = serde_json::from_str(&response.body).ok()?;
+
+        let code = value
+            .get("code")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error_code").and_then(Value::as_str))
+            .or_else(|| value.get("errcode").and_then(Value::as_str))
+            .map(ToOwned::to_owned);
+
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error_message").and_then(Value::as_str))
+            .or_else(|| value.get("errmsg").and_then(Value::as_str))
+            .or_else(|| value.get("error_description").and_then(Value::as_str))
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                value
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .and_then(|items| items.first())
+                    .and_then(|item| {
+                        item.get("message")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .or_else(|| {
+                                item.get("error")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned)
+                            })
+                    })
+            });
+
+        match (code, message) {
+            (Some(code), Some(message)) => Some((code, message)),
+            _ => None,
+        }
+    }
+
     /// 处理错误响应
     ///
     /// # 参数
@@ -42,8 +87,8 @@ impl ResponseHandler {
     /// 返回错误
     pub fn handle_error(response: &HttpResponse) -> WxPayResult<&str> {
         // 尝试解析错误响应
-        if let Ok(error) = serde_json::from_str::<ErrorResponse>(&response.body) {
-            return Err(WxPayError::api(error.code, error.message));
+        if let Some((code, message)) = Self::extract_error_payload(response) {
+            return Err(WxPayError::api(code, message));
         }
 
         // 如果无法解析，返回通用错误
@@ -244,6 +289,10 @@ pub struct WxPayErrorResponse {
 
     /// 错误信息
     pub message: String,
+
+    /// 错误详情
+    #[serde(default)]
+    pub detail: Option<Value>,
 }
 
 #[cfg(test)]
@@ -252,11 +301,7 @@ mod tests {
 
     #[test]
     fn test_response_handler_success() {
-        let response = HttpResponse::new(
-            200,
-            vec![],
-            r#"{"code":"SUCCESS"}"#.to_string(),
-        );
+        let response = HttpResponse::new(200, vec![], r#"{"code":"SUCCESS"}"#.to_string());
 
         let body = ResponseHandler::handle(&response).unwrap();
         assert_eq!(body, r#"{"code":"SUCCESS"}"#);
@@ -304,11 +349,7 @@ mod tests {
             code: String,
         }
 
-        let response = HttpResponse::new(
-            200,
-            vec![],
-            r#"{"code":"SUCCESS"}"#.to_string(),
-        );
+        let response = HttpResponse::new(200, vec![], r#"{"code":"SUCCESS"}"#.to_string());
 
         let parsed: TestResponse = ResponseHandler::parse(&response).unwrap();
         assert_eq!(parsed.code, "SUCCESS");

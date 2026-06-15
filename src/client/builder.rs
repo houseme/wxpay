@@ -4,12 +4,13 @@
 
 use std::sync::Arc;
 
+use super::WxPayClient;
+use crate::auth::{Sha256RsaSigner, Sha256RsaVerifier, Signer, Verifier};
+use crate::cert::CertManager;
 use crate::config::WxPayConfig;
 use crate::error::{WxPayError, WxPayResult};
-use crate::auth::{Signer, Verifier, Sha256RsaSigner, Sha256RsaVerifier};
-use crate::cert::CertManager;
 use crate::http::{HttpClient, ReqwestHttpClient};
-use super::WxPayClient;
+use crate::services::transport::TransportObserver;
 
 /// 客户端构建器
 ///
@@ -18,14 +19,24 @@ use super::WxPayClient;
 /// # 示例
 ///
 /// ```rust,no_run
-/// use wxpay_rs::WxPayClient;
+/// use wxpay_rs::{WxPayClient, WxPayConfig};
 ///
-/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let client = WxPayClient::builder()
-///     .config(config)
-///     .build()?;
-/// # Ok(())
-/// # }
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let config = WxPayConfig::builder()
+///         .app_id("wx88888888")
+///         .merchant_id("1900000109")
+///         .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+///         .private_key_from_file("path/to/private_key.pem")
+///         .cert_serial_number("CERT123456")
+///         .build()?;
+///
+///     let _client = WxPayClient::builder()
+///         .config(config)
+///         .build()
+///         .await?;
+///     Ok(())
+/// }
 /// ```
 pub struct WxPayClientBuilder {
     config: Option<WxPayConfig>,
@@ -33,6 +44,7 @@ pub struct WxPayClientBuilder {
     signer: Option<Arc<dyn Signer>>,
     verifier: Option<Arc<dyn Verifier>>,
     cert_manager: Option<Arc<CertManager>>,
+    transport_observer: Option<Arc<dyn TransportObserver>>,
 }
 
 impl WxPayClientBuilder {
@@ -44,6 +56,7 @@ impl WxPayClientBuilder {
             signer: None,
             verifier: None,
             cert_manager: None,
+            transport_observer: None,
         }
     }
 
@@ -77,23 +90,29 @@ impl WxPayClientBuilder {
         self
     }
 
+    /// 设置传输观测回调（可用于 Prometheus/OpenTelemetry/告警网关）
+    pub fn transport_observer(mut self, observer: impl TransportObserver + 'static) -> Self {
+        self.transport_observer = Some(Arc::new(observer));
+        self
+    }
+
     /// 构建客户端
     pub async fn build(self) -> WxPayResult<WxPayClient> {
-        let config = self.config.ok_or_else(|| {
-            WxPayError::missing_config("config")
-        })?;
-
+        let config = self
+            .config
+            .ok_or_else(|| WxPayError::missing_config("config"))?;
         let config = Arc::new(config);
 
         // 创建或使用提供的 HTTP 客户端
-        let http_client: Arc<dyn HttpClient> = self.http_client.unwrap_or_else(|| {
-            Arc::new(
+        let http_client: Arc<dyn HttpClient> = match self.http_client {
+            Some(client) => client,
+            None => Arc::new(
                 ReqwestHttpClient::builder()
                     .timeout(config.timeout)
-                    .build()
-                    .expect("创建 HTTP 客户端失败"),
-            )
-        });
+                    .max_retries(config.max_retries)
+                    .build()?,
+            ),
+        };
 
         // 创建或使用提供的签名器
         let signer: Arc<dyn Signer> = match self.signer {
@@ -114,16 +133,19 @@ impl WxPayClientBuilder {
         };
 
         // 创建或使用提供的证书管理器
-        let cert_manager = self.cert_manager.unwrap_or_else(|| {
-            Arc::new(CertManager::new())
-        });
+        let cert_manager = self
+            .cert_manager
+            .unwrap_or_else(|| Arc::new(CertManager::new()));
 
-        // 使用 WxPayClient::new 来完成构建
-        // 注意：这里我们需要绕过 WxPayClient::new 中的默认创建
-        // 因为我们已经有了自定义的组件
-        let client = WxPayClient::new(config.as_ref().clone()).await?;
-
-        Ok(client)
+        WxPayClient::new_with_components(
+            (*config).clone(),
+            http_client,
+            signer,
+            verifier,
+            cert_manager,
+            self.transport_observer,
+        )
+        .await
     }
 }
 
@@ -141,6 +163,7 @@ impl std::fmt::Debug for WxPayClientBuilder {
             .field("has_signer", &self.signer.is_some())
             .field("has_verifier", &self.verifier.is_some())
             .field("has_cert_manager", &self.cert_manager.is_some())
+            .field("has_transport_observer", &self.transport_observer.is_some())
             .finish()
     }
 }

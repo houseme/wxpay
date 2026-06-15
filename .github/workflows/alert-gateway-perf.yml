@@ -1,0 +1,35 @@
+name: Alert Gateway Perf
+
+concurrency:
+  group: alert-gateway-perf
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: '30 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      run_stress_test:
+        description: "Run ignored alert-gateway stress test (nightly/perf path)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  alert-gateway-perf:
+    name: Alert Gateway Adapter Stress Tests
+    continue-on-error: true
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.run_stress_test == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Run ignored stress test for alert gateway adapter
+        run: cargo +nightly test --example alert_gateway_adapter alert_gateway_stress_high_concurrency_should_stabilize_under_limit -- --ignored
