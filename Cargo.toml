@@ -1,10 +1,9 @@
 [package]
 name = "wxpay-rs"
 version = "0.0.1"
-edition = "2021"
-rust-version = "1.70.0"
+edition = "2024"
 authors = ["houseme <housemecn@gmail.com>"]
-description = "微信支付 API v3 Rust SDK - WeChat Pay API v3 Rust SDK"
+description = "WeChat Pay API v3 Rust SDK"
 documentation = "https://docs.rs/wxpay-rs"
 readme = "README.md"
 homepage = "https://github.com/houseme/wxpay"
