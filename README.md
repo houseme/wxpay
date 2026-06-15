@@ -23,7 +23,7 @@
 
 ```toml
 [dependencies]
-wxpay-rs = "0.1"
+wxpay-rs = "0.0.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -33,8 +33,6 @@ serde_json = "1"
 
 如果你是从 `wechatpay-apiv3/wechatpay-go` 迁移过来，或者准备直接接入支付/退款回调，可以先看这几份材料：
 
-- [docs/wechatpay-go-api-compare-v1.md](/Users/zhi/Documents/code/rust/houseme/wxpay/docs/wechatpay-go-api-compare-v1.md:1)：`wxpay-rs` 与 `wechatpay-go` 的 API 能力与命名对照
-- [docs/wechatpay-go-migration-guide-v1.md](/Users/zhi/Documents/code/rust/houseme/wxpay/docs/wechatpay-go-migration-guide-v1.md:1)：`wechatpay-go` 调用方式到 `wxpay-rs` 的迁移示例
 - [examples/webhook_axum.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_axum.rs:1)：`Axum` 支付/退款回调可编译骨架
 - [examples/webhook_actix.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_actix.rs:1)：`Actix-Web` 支付/退款回调可编译骨架
 - [.env.example](/Users/zhi/Documents/code/rust/houseme/wxpay/.env.example:1)：本地联调所需环境变量模板
@@ -66,6 +64,11 @@ cargo run --example webhook_actix
 - `client.profitsharing().finish_order(...)`
 
 如果你希望在第一轮迁移中尽量少改调用名，可以优先使用这层兼容入口，后续再逐步回收成 `wxpay-rs` 原生风格 API。
+
+说明：
+
+- 仓库内不再跟踪迁移草稿型文档，发布版以 `README`、crate API 和 `examples/` 为准。
+- 如果你需要本地迁移笔记，建议放在已忽略的 `local-docs/` 目录中自行维护。
 
 ## 🚀 快速开始
 
