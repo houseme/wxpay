@@ -12,24 +12,24 @@ pub type WxPayResult<T> = Result<T, WxPayError>;
 pub enum WxPayError {
     // ========== 配置错误 ==========
     /// 配置错误
-    #[error("配置错误: {message}")]
+    #[error("配置错误：{message}")]
     ConfigError { message: String },
 
     /// 无效的私钥
-    #[error("无效的私钥: {0}")]
+    #[error("无效的私钥：{0}")]
     InvalidPrivateKey(String),
 
     /// 无效的证书
-    #[error("无效的证书: {0}")]
+    #[error("无效的证书：{0}")]
     InvalidCertificate(String),
 
     /// 缺少必填配置项
-    #[error("缺少必填配置项: {field}")]
+    #[error("缺少必填配置项：{field}")]
     MissingConfig { field: String },
 
     // ========== 签名与验签错误 ==========
     /// 签名生成失败
-    #[error("签名生成失败: {0}")]
+    #[error("签名生成失败：{0}")]
     SignError(String),
 
     /// 签名验证失败
@@ -37,33 +37,33 @@ pub enum WxPayError {
     SignatureVerificationFailed,
 
     /// 无效的签名格式
-    #[error("无效的签名格式: {0}")]
+    #[error("无效的签名格式：{0}")]
     InvalidSignatureFormat(String),
 
     // ========== 加解密错误 ==========
     /// 加密失败
-    #[error("加密失败: {0}")]
+    #[error("加密失败：{0}")]
     EncryptionError(String),
 
     /// 解密失败
-    #[error("解密失败: {0}")]
+    #[error("解密失败：{0}")]
     DecryptionError(String),
 
     /// 无效的密钥
-    #[error("无效的密钥: {0}")]
+    #[error("无效的密钥：{0}")]
     InvalidKey(String),
 
     /// 无效的密文格式
-    #[error("无效的密文格式: {0}")]
+    #[error("无效的密文格式：{0}")]
     InvalidCiphertext(String),
 
     // ========== 证书错误 ==========
     /// 证书下载失败
-    #[error("证书下载失败: {0}")]
+    #[error("证书下载失败：{0}")]
     CertificateDownloadError(String),
 
     /// 证书解析失败
-    #[error("证书解析失败: {0}")]
+    #[error("证书解析失败：{0}")]
     CertificateParseError(String),
 
     /// 证书已过期
@@ -71,24 +71,24 @@ pub enum WxPayError {
     CertificateExpired,
 
     /// 证书验证失败
-    #[error("证书验证失败: {0}")]
+    #[error("证书验证失败：{0}")]
     CertificateVerificationError(String),
 
     /// 找不到匹配的证书
-    #[error("找不到匹配的证书: serial_number={0}")]
+    #[error("找不到匹配的证书：serial_number={0}")]
     CertificateNotFound(String),
 
     // ========== HTTP 错误 ==========
     /// 网络错误
-    #[error("网络错误: {0}")]
+    #[error("网络错误：{0}")]
     NetworkError(#[from] reqwest::Error),
 
     /// HTTP 请求构建失败
-    #[error("HTTP 请求构建失败: {0}")]
+    #[error("HTTP 请求构建失败：{0}")]
     RequestBuildError(String),
 
     /// HTTP 响应解析失败
-    #[error("HTTP 响应解析失败: {0}")]
+    #[error("HTTP 响应解析失败：{0}")]
     ResponseParseError(String),
 
     /// 请求超时
@@ -97,7 +97,7 @@ pub enum WxPayError {
 
     // ========== API 错误 ==========
     /// 微信支付 API 错误
-    #[error("API 错误: code={code}, message={message}")]
+    #[error("API 错误：code={code}, message={message}")]
     ApiError {
         /// 错误码
         code: String,
@@ -106,11 +106,11 @@ pub enum WxPayError {
     },
 
     /// API 返回了意外的状态码
-    #[error("意外的 HTTP 状态码: {0}")]
+    #[error("意外的 HTTP 状态码：{0}")]
     UnexpectedStatusCode(u16),
 
     /// 业务逻辑错误
-    #[error("业务错误: {0}")]
+    #[error("业务错误：{0}")]
     BusinessError(String),
 
     // ========== 通知错误 ==========
@@ -119,41 +119,41 @@ pub enum WxPayError {
     NotifySignatureVerificationFailed,
 
     /// 通知解密失败
-    #[error("通知解密失败: {0}")]
+    #[error("通知解密失败：{0}")]
     NotifyDecryptionError(String),
 
     /// 无效的通知格式
-    #[error("无效的通知格式: {0}")]
+    #[error("无效的通知格式：{0}")]
     InvalidNotifyFormat(String),
 
     /// 无效的通知类型
-    #[error("无效的通知类型: {0}")]
+    #[error("无效的通知类型：{0}")]
     InvalidNotifyType(String),
 
     // ========== 序列化错误 ==========
     /// JSON 序列化/反序列化错误
-    #[error("JSON 错误: {0}")]
+    #[error("JSON 错误：{0}")]
     JsonError(#[from] serde_json::Error),
 
     /// URL 编码错误
-    #[error("URL 编码错误: {0}")]
+    #[error("URL 编码错误：{0}")]
     UrlEncodeError(String),
 
     /// URL 解析错误
-    #[error("URL 解析错误: {0}")]
+    #[error("URL 解析错误：{0}")]
     UrlParseError(#[from] url::ParseError),
 
     // ========== 其他错误 ==========
     /// 内部错误
-    #[error("内部错误: {0}")]
+    #[error("内部错误：{0}")]
     InternalError(String),
 
     /// 不支持的操作
-    #[error("不支持的操作: {0}")]
+    #[error("不支持的操作：{0}")]
     UnsupportedOperation(String),
 
     /// 参数错误
-    #[error("参数错误: {0}")]
+    #[error("参数错误：{0}")]
     InvalidParameter(String),
 }
 
@@ -268,35 +268,35 @@ impl WxPayError {
 /// 从 base64 错误转换
 impl From<base64::DecodeError> for WxPayError {
     fn from(err: base64::DecodeError) -> Self {
-        Self::InternalError(format!("Base64 解码错误: {}", err))
+        Self::InternalError(format!("Base64 解码错误：{}", err))
     }
 }
 
 /// 从 RSA 错误转换
 impl From<rsa::Error> for WxPayError {
     fn from(err: rsa::Error) -> Self {
-        Self::SignError(format!("RSA 错误: {}", err))
+        Self::SignError(format!("RSA 错误：{}", err))
     }
 }
 
 /// 从 PKCS 错误转换
 impl From<pkcs8::Error> for WxPayError {
     fn from(err: pkcs8::Error) -> Self {
-        Self::InvalidPrivateKey(format!("PKCS8 错误: {}", err))
+        Self::InvalidPrivateKey(format!("PKCS8 错误：{}", err))
     }
 }
 
 /// 从 DER 错误转换
 impl From<der::Error> for WxPayError {
     fn from(err: der::Error) -> Self {
-        Self::CertificateParseError(format!("DER 解码错误: {}", err))
+        Self::CertificateParseError(format!("DER 解码错误：{}", err))
     }
 }
 
 /// 从时间解析错误转换
 impl From<chrono::ParseError> for WxPayError {
     fn from(err: chrono::ParseError) -> Self {
-        Self::InternalError(format!("时间解析错误: {}", err))
+        Self::InternalError(format!("时间解析错误：{}", err))
     }
 }
 
@@ -307,10 +307,10 @@ mod tests {
     #[test]
     fn test_error_display() {
         let err = WxPayError::config("missing app_id");
-        assert_eq!(err.to_string(), "配置错误: missing app_id");
+        assert_eq!(err.to_string(), "配置错误：missing app_id");
 
         let err = WxPayError::api("PARAM_ERROR", "参数错误");
-        assert_eq!(err.to_string(), "API 错误: code=PARAM_ERROR, message=参数错误");
+        assert_eq!(err.to_string(), "API 错误：code=PARAM_ERROR, message=参数错误");
     }
 
     #[test]

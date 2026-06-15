@@ -20,15 +20,15 @@ crate-type = ["lib"]
 
 [dependencies]
 # 异步运行时
-tokio = { version = "1.36", features = ["full"] }
+tokio = { version = "1.52", features = ["full"] }
 async-trait = "0.1"
 
 # HTTP 客户端
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["charset", "http2", "system-proxy", "json", "form", "query", "hickory-dns"] }
 
 # TLS
 rustls = { version = "0.23", features = ["aws_lc_rs"] }
-rustls-pemfile = "2.1"
+rustls-pemfile = "2.2"
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
@@ -45,47 +45,48 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # UUID 生成
-uuid = { version = "1.7", features = ["v4"] }
+uuid = { version = "1.23", features = ["v4"] }
 
 # URL 解析
 url = "2.5"
 
 # 加密库
-rsa = "0.9"
-sha2 = "0.10"
-digest = "0.10"
-aes-gcm = "0.10"
+rsa = "0.10.0-rc.18"
+sha2 = "0.11"
+digest = "0.11.3"
+aes-gcm = "0.11.0-rc.4"
 base64 = "0.22"
 hex = "0.4"
-rand = "0.8"
+rand = "0.10.1"
 
 # 证书处理
-x509-cert = "0.2"
-der = "0.7"
-pkcs1 = "0.7"
-pkcs8 = "0.10"
-spki = "0.7"
+x509-cert = "0.3.0-rc.4"
+der = "0.8"
+pkcs1 = "0.8.0-rc.4"
+pkcs8 = "0.11"
+spki = "0.8"
 
 # 异步工具
 futures = "0.3"
 pin-project-lite = "0.2"
+hmac = "0.12.1"
 
 [dev-dependencies]
 # 测试框架
 tokio-test = "0.4"
-mockall = "0.12"
+mockall = "0.14.0"
 wiremock = "0.6"
 pretty_assertions = "1.4"
 
 # 测试数据生成
-fake = { version = "3.1", features = ["derive"] }
+fake = { version = "5.1", features = ["derive"] }
 
 # 性能测试
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 
 [features]
 default = ["tls-rustls"]
-tls-rustls = ["reqwest/rustls-tls"]
+tls-rustls = ["reqwest/rustls"]
 full = ["tls-rustls"]
 
 [profile.release]

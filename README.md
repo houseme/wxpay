@@ -47,7 +47,7 @@ async fn main() -> WxPayResult<()> {
     let config = WxPayConfig::new(
         "wx888888888",                              // AppID
         "1900000109",                               // 商户号
-        "22222222",                                 // 商户API密钥
+        "22222222",                                 // 商户 API 密钥
         PathBuf::from("/path/to/apiclient_cert.pem"),  // 商户证书
         PathBuf::from("/path/to/apiclient_key.pem"),   // 商户私钥
     )
@@ -89,11 +89,11 @@ async fn create_jsapi_order(client: &WxPayClient) -> WxPayResult<()> {
 
     // 调用预支付接口
     let result = client.jsapi().prepay(request).await?;
-    println!("预支付结果: {:?}", result);
+    println!("预支付结果：{:?}", result);
 
     // 生成前端支付参数
     let pay_params = client.jsapi().build_pay_params(&result.prepay_id)?;
-    println!("前端支付参数: {:?}", pay_params);
+    println!("前端支付参数：{:?}", pay_params);
 
     Ok(())
 }
@@ -119,7 +119,7 @@ async fn create_native_order(client: &WxPayClient) -> WxPayResult<()> {
     };
 
     let result = client.native().prepay(request).await?;
-    println!("二维码链接: {}", result.code_url);
+    println!("二维码链接：{}", result.code_url);
 
     Ok(())
 }
@@ -133,11 +133,11 @@ use wxpay_rs::services::payments::query::*;
 async fn query_order(client: &WxPayClient) -> WxPayResult<()> {
     // 通过商户订单号查询
     let result = client.query().by_out_trade_no("20240101000001").await?;
-    println!("订单状态: {:?}", result.trade_state);
+    println!("订单状态：{:?}", result.trade_state);
 
     // 通过微信支付订单号查询
     let result = client.query().by_transaction_id("4200001234202401010000001").await?;
-    println!("订单详情: {:?}", result);
+    println!("订单详情：{:?}", result);
 
     Ok(())
 }
@@ -162,7 +162,7 @@ async fn create_refund(client: &WxPayClient) -> WxPayResult<()> {
     };
 
     let result = client.refund().create(request).await?;
-    println!("退款单号: {}", result.refund_id);
+    println!("退款单号：{}", result.refund_id);
 
     Ok(())
 }
@@ -185,14 +185,14 @@ async fn handle_payment_notify(
     // 处理支付结果
     match transaction.trade_state {
         TradeState::Success => {
-            println!("支付成功！订单号: {}", transaction.out_trade_no);
+            println!("支付成功！订单号：{}", transaction.out_trade_no);
             // 业务处理...
         }
         TradeState::Closed => {
-            println!("订单已关闭: {}", transaction.out_trade_no);
+            println!("订单已关闭：{}", transaction.out_trade_no);
         }
         _ => {
-            println!("其他状态: {:?}", transaction.trade_state);
+            println!("其他状态：{:?}", transaction.trade_state);
         }
     }
 
@@ -467,7 +467,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. 生成前端调起支付的参数
     let pay_params = client.jsapi().build_pay_params(&prepay_result.prepay_id)?;
-    println!("前端支付参数: {:#?}", pay_params);
+    println!("前端支付参数：{:#?}", pay_params);
 
     // 5. 处理支付回调（在回调接口中）
     // let handler = client.notify_handler();
