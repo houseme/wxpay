@@ -330,4 +330,77 @@ mod tests {
         let result = cipher.encrypt_with_nonce("test", b"short");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_aes_decrypt_tampered_ciphertext_fails() {
+        let api_v3_key = "abcdefghijklmnopqrstuvwxyz123456";
+        let cipher = Aes256GcmCipher::new(api_v3_key).unwrap();
+
+        let (nonce, ciphertext) = cipher.encrypt("secret").unwrap();
+        // 篡改密文：base64 解码后翻转首字节再编码，保证 base64 合法但 GCM 认证失败。
+        let mut bytes = base64::engine::general_purpose::STANDARD
+            .decode(&ciphertext)
+            .unwrap();
+        bytes[0] ^= 0xff;
+        let tampered = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let result = cipher.decrypt(&nonce, &tampered);
+        assert!(matches!(result, Err(WxPayError::DecryptionError(_))));
+    }
+
+    #[test]
+    fn test_aes_decrypt_with_wrong_key_fails() {
+        let api_v3_key_a = "abcdefghijklmnopqrstuvwxyz123456"; // 32 字符
+        let api_v3_key_b = "zyxwvutsrqponmlkjihgfedcba123456"; // 32 字符，不同密钥
+        let enc = Aes256GcmCipher::new(api_v3_key_a).unwrap();
+        let dec = Aes256GcmCipher::new(api_v3_key_b).unwrap();
+
+        let (nonce, ciphertext) = enc.encrypt("secret").unwrap();
+        let result = dec.decrypt(&nonce, &ciphertext);
+        assert!(matches!(result, Err(WxPayError::DecryptionError(_))));
+    }
+
+    #[test]
+    fn test_aes_decrypt_invalid_base64_nonce() {
+        let api_v3_key = "abcdefghijklmnopqrstuvwxyz123456";
+        let cipher = Aes256GcmCipher::new(api_v3_key).unwrap();
+
+        // 非法 base64 的 nonce 应返回 InvalidCiphertext。
+        let result = cipher.decrypt("!!!not-base64!!!", "ok");
+        assert!(matches!(result, Err(WxPayError::InvalidCiphertext(_))));
+    }
+
+    #[test]
+    fn test_aes_decrypt_invalid_base64_ciphertext() {
+        let api_v3_key = "abcdefghijklmnopqrstuvwxyz123456";
+        let cipher = Aes256GcmCipher::new(api_v3_key).unwrap();
+
+        // 合法 nonce（base64 编码的 12 字节）但密文非法 base64。
+        let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(b"123456789012");
+        let result = cipher.decrypt(&nonce_b64, "!!!not-base64!!!");
+        assert!(matches!(result, Err(WxPayError::InvalidCiphertext(_))));
+    }
+
+    #[test]
+    fn test_aes_decrypt_nonce_wrong_length() {
+        let api_v3_key = "abcdefghijklmnopqrstuvwxyz123456";
+        let cipher = Aes256GcmCipher::new(api_v3_key).unwrap();
+
+        // nonce 解码后不足 12 字节（如 8 字节）应返回 InvalidParameter。
+        let short_nonce = base64::engine::general_purpose::STANDARD.encode(b"12345678");
+        let ciphertext = base64::engine::general_purpose::STANDARD.encode(b"somebytes");
+        let result = cipher.decrypt(&short_nonce, &ciphertext);
+        assert!(matches!(result, Err(WxPayError::InvalidParameter(_))));
+    }
+
+    #[test]
+    fn test_aes_from_key_requires_32_bytes() {
+        assert!(Aes256GcmCipher::from_key(&[0u8; 16]).is_err());
+        assert!(Aes256GcmCipher::from_key(&[0u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn test_aes_encrypt_with_nonce_rejects_bad_length() {
+        let cipher = Aes256GcmCipher::new("abcdefghijklmnopqrstuvwxyz123456").unwrap();
+        assert!(cipher.encrypt_with_nonce("x", b"too-short").is_err());
+    }
 }

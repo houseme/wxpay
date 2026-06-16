@@ -372,8 +372,43 @@ impl std::fmt::Debug for CertRefresher {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn test_cert_downloader_build_url() {
-        // 这个测试需要实际的依赖，跳过
+    fn test_decode_certificate_der_plain_base64() {
+        // 纯 base64（无 PEM 头）输入应直接解码。
+        let original = vec![0x30u8, 0x82, 0x01, 0x23, 0xAB, 0xCD];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&original);
+
+        let decoded = decode_certificate_der(&b64).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_decode_certificate_der_pem_form() {
+        // PEM 形式（带 BEGIN/END CERTIFICATE）应剥离头尾行后再解码。
+        let original = vec![0xAAu8, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&original);
+        let pem = format!("-----BEGIN CERTIFICATE-----\n{b64}\n-----END CERTIFICATE-----");
+
+        let decoded = decode_certificate_der(&pem).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_decode_certificate_der_rejects_invalid() {
+        // 非法 base64 应返回解析错误。
+        let result = decode_certificate_der("!!!not-base64!!!");
+        assert!(matches!(result, Err(WxPayError::CertificateParseError(_))));
+    }
+
+    #[test]
+    fn test_decode_certificate_der_handles_whitespace() {
+        // 前后空白应被 trim，仍可正确解码。
+        let original = vec![0x01u8, 0x02, 0x03];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&original);
+
+        let decoded = decode_certificate_der(&format!("  {b64}  ")).unwrap();
+        assert_eq!(decoded, original);
     }
 }

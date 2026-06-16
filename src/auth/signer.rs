@@ -121,7 +121,17 @@ impl Sha256RsaSigner {
         nonce: &str,
         body: &str,
     ) -> String {
-        format!("{}\n{}\n{}\n{}\n{}\n", method, url, timestamp, nonce, body)
+        // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时 String 分配。
+        use std::fmt::Write;
+        let mut s = String::with_capacity(
+            method.len() + url.len() + nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 5,
+        );
+        let _ = write!(
+            s,
+            "{}\n{}\n{}\n{}\n{}\n",
+            method, url, timestamp, nonce, body
+        );
+        s
     }
 
     /// 构建 Authorization Header
@@ -133,10 +143,24 @@ impl Sha256RsaSigner {
         timestamp: i64,
         signature: &str,
     ) -> String {
-        format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
+        // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时 String 分配。
+        use std::fmt::Write;
+        const PREFIX: &str = r#"WECHATPAY2-SHA256-RSA2048 mchid=""#;
+        let mut s = String::with_capacity(
+            PREFIX.len()
+                + self.merchant_id.len()
+                + nonce.len()
+                + self.cert_serial_number.len()
+                + signature.len()
+                + /*固定分隔与引号*/ 64
+                + /*timestamp*/ 20,
+        );
+        let _ = write!(
+            s,
+            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
             self.merchant_id, nonce, timestamp, self.cert_serial_number, signature
-        )
+        );
+        s
     }
 }
 
@@ -179,6 +203,15 @@ impl std::fmt::Debug for Sha256RsaSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+
+    /// 测试用 PKCS#8 私钥（PEM），2048-bit，与 auth/verifier 测试用证书配套。
+    const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
+
+    fn test_signer() -> Sha256RsaSigner {
+        Sha256RsaSigner::new("1900000109", TEST_PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
+            .expect("测试签名器应创建成功")
+    }
 
     #[test]
     fn test_build_sign_message() {
@@ -195,19 +228,68 @@ mod tests {
         assert!(message.contains("1609459200"));
         assert!(message.contains("test_nonce"));
         assert!(message.ends_with("\n"));
+
+        // 性能优化回归：与 format! 产物逐字节等价。
+        assert_eq!(
+            message,
+            format!(
+                "POST\n/v3/pay/transactions/jsapi\n1609459200\ntest_nonce\n{{\"app_id\":\"wx88888888\"}}\n"
+            )
+        );
     }
 
     #[test]
     fn test_build_authorization_header() {
-        // 这个测试需要有效的签名器，跳过实际签名
-        // 仅测试格式
-        let header = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}"#,
-            "1900000109", "test_nonce", "1609459200", "CERT123", "test_signature"
-        );
+        // 用真实签名器实例构建，验证格式正确性（商户号、序列号、时间戳、nonce、签名均嵌入）。
+        let signer = test_signer();
+        let header = signer.build_authorization_header("nonce_abc", 1700000000, "sig_xyz");
 
-        assert!(header.contains("WECHATPAY2-SHA256-RSA2048"));
+        assert!(header.starts_with("WECHATPAY2-SHA256-RSA2048 "));
         assert!(header.contains("mchid=\"1900000109\""));
-        assert!(header.contains("nonce_str=\"test_nonce\""));
+        assert!(header.contains("nonce_str=\"nonce_abc\""));
+        assert!(header.contains("timestamp=\"1700000000\""));
+        assert!(header.contains("serial_no=\"CERT123456\""));
+        assert!(header.contains("signature=\"sig_xyz\""));
+    }
+
+    #[tokio::test]
+    async fn test_sign_is_deterministic_and_well_formed() {
+        // PKCS1v15 + SHA256 是确定性签名：同一消息两次签名应完全一致。
+        let signer = test_signer();
+        let message = r#"{"app_id":"wx88888888","mchid":"1900000109"}"#;
+
+        let sig_a = signer.sign(message).await.unwrap();
+        let sig_b = signer.sign(message).await.unwrap();
+        assert_eq!(sig_a, sig_b, "PKCS1v15 签名应为确定性的");
+
+        // 2048-bit RSA 签名 = 256 字节 -> base64 长度 344（含可能的填充）。
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&sig_a)
+            .expect("签名应为合法 base64");
+        assert_eq!(bytes.len(), 256, "2048 位密钥签名应为 256 字节");
+
+        // 不同消息应产生不同签名。
+        let sig_other = signer.sign("different message").await.unwrap();
+        assert_ne!(sig_a, sig_other);
+    }
+
+    #[tokio::test]
+    async fn test_signer_accessors() {
+        let signer = test_signer();
+        assert_eq!(signer.merchant_id(), "1900000109");
+        assert_eq!(signer.cert_serial_number(), "CERT123456");
+    }
+
+    #[test]
+    fn test_new_rejects_invalid_private_key() {
+        let result = Sha256RsaSigner::new("mch", b"not a valid pem", "serial");
+        assert!(matches!(result, Err(WxPayError::InvalidPrivateKey(_))));
+    }
+
+    #[test]
+    fn test_new_rejects_non_utf8_key() {
+        // 非 UTF-8 字节应被拒绝，而非 panic。
+        let result = Sha256RsaSigner::new("mch", &[0xff, 0xfe, 0xfd], "serial");
+        assert!(matches!(result, Err(WxPayError::InvalidPrivateKey(_))));
     }
 }

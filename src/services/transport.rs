@@ -403,3 +403,331 @@ impl ServiceTransport {
         serde_json::from_str(body).map_err(WxPayError::from)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::Sha256RsaSigner;
+    use crate::config::WxPayConfig;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    /// 与 auth/verifier 测试同源的测试私钥（PEM），用于构造可实际签名的签名器。
+    const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
+
+    fn test_config() -> Arc<WxPayConfig> {
+        let config = WxPayConfig::builder()
+            .app_id("wx88888888")
+            .merchant_id("1900000109")
+            .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+            .private_key(TEST_PRIVATE_KEY_PEM.as_bytes().to_vec())
+            .cert_serial_number("CERT123456")
+            .build()
+            .unwrap();
+        Arc::new(config)
+    }
+
+    fn test_signer() -> Arc<dyn Signer> {
+        Arc::new(
+            Sha256RsaSigner::new("1900000109", TEST_PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
+                .unwrap(),
+        )
+    }
+
+    /// 记录单次请求的 mock HTTP 客户端，可配置返回的响应。
+    struct MockHttpClient {
+        response: HttpResponse,
+        captured_url: Mutex<Option<String>>,
+        captured_headers: Mutex<Vec<(String, String)>>,
+        captured_body: Mutex<Option<String>>,
+    }
+
+    impl MockHttpClient {
+        fn new(status: u16, body: &str) -> Self {
+            Self {
+                response: HttpResponse::new(
+                    status,
+                    vec![("Request-ID".to_string(), "mock-req-001".to_string())],
+                    body.to_string(),
+                ),
+                captured_url: Mutex::new(None),
+                captured_headers: Mutex::new(Vec::new()),
+                captured_body: Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl HttpClient for MockHttpClient {
+        async fn get(
+            &self,
+            url: &str,
+            headers: Vec<(String, String)>,
+        ) -> WxPayResult<HttpResponse> {
+            *self.captured_url.lock().unwrap() = Some(url.to_string());
+            *self.captured_headers.lock().unwrap() = headers.clone();
+            Ok(self.response.clone())
+        }
+        async fn post(
+            &self,
+            url: &str,
+            headers: Vec<(String, String)>,
+            body: &str,
+        ) -> WxPayResult<HttpResponse> {
+            *self.captured_url.lock().unwrap() = Some(url.to_string());
+            *self.captured_headers.lock().unwrap() = headers.clone();
+            *self.captured_body.lock().unwrap() = Some(body.to_string());
+            Ok(self.response.clone())
+        }
+        async fn put(
+            &self,
+            url: &str,
+            headers: Vec<(String, String)>,
+            body: &str,
+        ) -> WxPayResult<HttpResponse> {
+            *self.captured_url.lock().unwrap() = Some(url.to_string());
+            *self.captured_headers.lock().unwrap() = headers;
+            *self.captured_body.lock().unwrap() = Some(body.to_string());
+            Ok(self.response.clone())
+        }
+        async fn delete(
+            &self,
+            url: &str,
+            headers: Vec<(String, String)>,
+        ) -> WxPayResult<HttpResponse> {
+            *self.captured_url.lock().unwrap() = Some(url.to_string());
+            *self.captured_headers.lock().unwrap() = headers;
+            Ok(self.response.clone())
+        }
+        async fn patch(
+            &self,
+            url: &str,
+            headers: Vec<(String, String)>,
+            body: &str,
+        ) -> WxPayResult<HttpResponse> {
+            *self.captured_url.lock().unwrap() = Some(url.to_string());
+            *self.captured_headers.lock().unwrap() = headers;
+            *self.captured_body.lock().unwrap() = Some(body.to_string());
+            Ok(self.response.clone())
+        }
+    }
+
+    fn build_transport(http: Arc<MockHttpClient>) -> ServiceTransport {
+        ServiceTransport::new(test_config(), http, test_signer())
+    }
+
+    #[tokio::test]
+    async fn test_request_signs_and_parses_success() {
+        let http = Arc::new(MockHttpClient::new(200, r#"{"prepay_id":"wx20240101"}"#));
+        let transport = build_transport(http.clone());
+
+        #[derive(serde::Deserialize)]
+        struct Prepay {
+            prepay_id: String,
+        }
+
+        let body = r#"{"app_id":"wx88888888"}"#;
+        let resp: Prepay = transport
+            .request(
+                HttpMethod::Post,
+                "/v3/pay/transactions/jsapi",
+                Some(body),
+                "test",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.prepay_id, "wx20240101");
+
+        // 验证请求被签名：Authorization 头存在且包含商户号与序列号。
+        let headers = http.captured_headers.lock().unwrap().clone();
+        let auth = headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("Authorization"))
+            .map(|(_, v)| v.as_str())
+            .expect("应携带 Authorization 头");
+        assert!(auth.starts_with("WECHATPAY2-SHA256-RSA2048 "));
+        assert!(auth.contains("mchid=\"1900000109\""));
+        assert!(auth.contains("serial_no=\"CERT123456\""));
+        assert!(auth.contains("signature=\""));
+
+        // 验证 URL 被正确拼接为完整地址。
+        let url = http.captured_url.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            url,
+            "https://api.mch.weixin.qq.com/v3/pay/transactions/jsapi"
+        );
+
+        // 验证请求体被透传。
+        let captured_body = http.captured_body.lock().unwrap().clone().unwrap();
+        assert_eq!(captured_body, body);
+    }
+
+    #[tokio::test]
+    async fn test_request_default_handles_empty_body() {
+        let http = Arc::new(MockHttpClient::new(204, ""));
+        let transport = build_transport(http);
+
+        #[derive(serde::Deserialize, Default)]
+        struct Empty;
+
+        // 空响应体应返回默认值，而非 JSON 解析错误。
+        let resp: Empty = transport
+            .request_default(HttpMethod::Post, "/v3/pay/close", Some("{}"), "test")
+            .await
+            .unwrap();
+        let _ = resp;
+    }
+
+    #[tokio::test]
+    async fn test_api_error_is_classified() {
+        // 返回限流错误码，验证 transport 将其归一为 ApiError 并正确分类。
+        let http = Arc::new(MockHttpClient::new(
+            429,
+            r#"{"code":"FREQ_LIMIT","message":"请求过于频繁"}"#,
+        ));
+        let transport = build_transport(http);
+
+        let err = transport
+            .request::<serde_json::Value>(HttpMethod::Get, "/v3/pay/transactions/x", None, "test")
+            .await
+            .unwrap_err();
+
+        match &err {
+            WxPayError::ApiError { code, message } => {
+                assert_eq!(code, "FREQ_LIMIT");
+                assert_eq!(message, "请求过于频繁");
+            }
+            other => panic!("应为 ApiError，实际: {other:?}"),
+        }
+        // 限流应被分类为 RateLimited 且建议重试。
+        assert_eq!(err.api_kind(), Some(WxPayErrorKind::RateLimited));
+        assert!(err.should_retry());
+    }
+
+    /// 记录 observer 回调的简单实现。
+    struct CountingObserver {
+        success: std::sync::atomic::AtomicUsize,
+        error: std::sync::atomic::AtomicUsize,
+        last_event: Mutex<Option<TransportEvent>>,
+    }
+
+    impl CountingObserver {
+        fn new() -> Self {
+            Self {
+                success: std::sync::atomic::AtomicUsize::new(0),
+                error: std::sync::atomic::AtomicUsize::new(0),
+                last_event: Mutex::new(None),
+            }
+        }
+    }
+
+    impl TransportObserver for CountingObserver {
+        fn on_success(&self, event: &TransportEvent) {
+            self.success
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.last_event.lock().unwrap() = Some(clone_event(event));
+        }
+        fn on_error(&self, event: &TransportEvent, _error: &WxPayError) {
+            self.error.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.last_event.lock().unwrap() = Some(clone_event(event));
+        }
+    }
+
+    // TransportEvent 字段较多，手工克隆以避免为测试派生 Clone。
+    fn clone_event(e: &TransportEvent) -> TransportEvent {
+        TransportEvent {
+            operation: e.operation.clone(),
+            method: e.method.clone(),
+            path: e.path.clone(),
+            status: e.status,
+            request_id: e.request_id.clone(),
+            elapsed_ms: e.elapsed_ms,
+            merchant_id: e.merchant_id.clone(),
+            app_id: e.app_id.clone(),
+            is_success: e.is_success,
+            error_code: e.error_code.clone(),
+            error_kind: e.error_kind,
+            alert_level: e.alert_level,
+            alert_policy: e.alert_policy.clone(),
+            should_retry: e.should_retry,
+            is_auth_error: e.is_auth_error,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_observer_fires_on_success_and_error() {
+        // 成功路径触发 on_success。
+        let observer = Arc::new(CountingObserver::new());
+        let http = Arc::new(MockHttpClient::new(200, r#"{"ok":true}"#));
+        let transport = ServiceTransport::new_with_observer(
+            test_config(),
+            http,
+            test_signer(),
+            Some(observer.clone()),
+        );
+        let _: serde_json::Value = transport
+            .request(HttpMethod::Get, "/v3/any", None, "ok-op")
+            .await
+            .unwrap();
+        assert_eq!(
+            observer.success.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        {
+            let evt = observer.last_event.lock().unwrap();
+            let evt = evt.as_ref().unwrap();
+            assert!(evt.is_success);
+            assert_eq!(evt.operation, "ok-op");
+            assert_eq!(evt.status, 200);
+            assert_eq!(evt.alert_policy, "success");
+        }
+
+        // 错误路径触发 on_error，且事件携带错误分类。
+        let observer2 = Arc::new(CountingObserver::new());
+        let http2 = Arc::new(MockHttpClient::new(
+            401,
+            r#"{"code":"SIGN_ERROR","message":"签名错误"}"#,
+        ));
+        let transport2 = ServiceTransport::new_with_observer(
+            test_config(),
+            http2,
+            test_signer(),
+            Some(observer2.clone()),
+        );
+        let _: Result<serde_json::Value, _> = transport2
+            .request(HttpMethod::Get, "/v3/any", None, "err-op")
+            .await;
+        assert_eq!(observer2.error.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let evt = observer2.last_event.lock().unwrap();
+        let evt = evt.as_ref().unwrap();
+        assert!(!evt.is_success);
+        assert_eq!(evt.error_kind, Some(WxPayErrorKind::Authentication));
+        assert!(evt.is_auth_error);
+        assert_eq!(evt.alert_policy, "security.auth");
+    }
+
+    #[tokio::test]
+    async fn test_transport_event_helpers() {
+        let evt = TransportEvent::success("op", "GET", "/v3/x", &test_config(), 200, "req-1", 42);
+        assert_eq!(evt.alert_key(), "low.success");
+        assert!(!evt.should_alert());
+
+        let err = WxPayError::Timeout;
+        let err_evt = TransportEvent::error(
+            &test_config(),
+            TransportErrorContext {
+                operation: "op",
+                method: "GET",
+                path: "/v3/x",
+                status: 0,
+                request_id: "req-1",
+                elapsed_ms: 42,
+                error: &err,
+            },
+        );
+        assert_eq!(err_evt.error_kind_label(), "non_api");
+        assert!(err_evt.should_alert());
+        assert_eq!(err_evt.alert_key(), "critical.network");
+    }
+}

@@ -299,6 +299,67 @@ impl std::fmt::Debug for NotifyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::Sha256RsaVerifier;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+    use base64::Engine;
+    use std::sync::Arc;
+
+    const API_V3_KEY: &str = "abcdefghijklmnopqrstuvwxyz123456";
+
+    fn test_handler() -> NotifyHandler {
+        // verifier 仅用于满足构造签名，验签逻辑由专门测试覆盖；这里传一个真实 DER 解析会失败，
+        // 因此用一个最小可用的“空证书列表” verifier（Sha256RsaVerifier::new(vec![]) 可成功构造）。
+        let verifier: Arc<dyn Verifier> = Arc::new(Sha256RsaVerifier::new(vec![]).unwrap());
+        let config = NotifyConfig {
+            api_v3_key: API_V3_KEY.to_string(),
+            cert_serial_number: "CERT123456".to_string(),
+            platform_certificate: vec![],
+        };
+        NotifyHandler::new(config, verifier).unwrap()
+    }
+
+    /// 用真实 AES-256-GCM 加密一段支付通知明文，返回可被 NotifyRequest 引用的字段值。
+    fn encrypt_resource(plaintext: &str, associated_data: &str, nonce: &str) -> (String, String) {
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest;
+        hasher.update(API_V3_KEY.as_bytes());
+        let key = hasher.finalize();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let nonce_bytes: [u8; 12] = nonce.as_bytes().try_into().unwrap();
+        let nonce_value = Nonce::from(nonce_bytes);
+        let ct = cipher
+            .encrypt(
+                &nonce_value,
+                aes_gcm::aead::Payload {
+                    msg: plaintext.as_bytes(),
+                    aad: associated_data.as_bytes(),
+                },
+            )
+            .unwrap();
+        let ciphertext_b64 = base64::engine::general_purpose::STANDARD.encode(ct);
+        // 返回原始 nonce 字符串（与微信通知一致，明文 nonce）。
+        (ciphertext_b64, nonce.to_string())
+    }
+
+    fn make_request(
+        notify_type: &str,
+        algorithm: &str,
+        ciphertext: &str,
+        nonce: &str,
+        associated_data: &str,
+    ) -> NotifyRequest {
+        NotifyRequest {
+            id: "EV-TEST".to_string(),
+            create_time: "2024-01-01T00:00:00+08:00".to_string(),
+            notify_type: notify_type.to_string(),
+            resource: NotifyResource {
+                algorithm: algorithm.to_string(),
+                ciphertext: ciphertext.to_string(),
+                associated_data: Some(associated_data.to_string()),
+                nonce: nonce.to_string(),
+            },
+        }
+    }
 
     #[test]
     fn test_notify_request_deserialization() {
@@ -337,5 +398,152 @@ mod tests {
         let data: PaymentNotifyData = serde_json::from_str(json).unwrap();
         assert_eq!(data.trade_state, "SUCCESS");
         assert_eq!(data.transaction_id, "1217752501201407033233368018");
+    }
+
+    #[tokio::test]
+    async fn test_handle_payment_notify_decrypts_and_parses() {
+        let handler = test_handler();
+
+        let plaintext = r#"{
+            "appid": "wx88888888",
+            "mchid": "1900000109",
+            "out_trade_no": "out_20240101",
+            "transaction_id": "4200000001",
+            "trade_type": "JSAPI",
+            "trade_state": "SUCCESS",
+            "trade_state_desc": "支付成功",
+            "bank_type": "CMB_CREDIT",
+            "success_time": "2024-01-01T00:00:00+08:00"
+        }"#;
+        let nonce = "nonce1234567"; // 12 字节
+        let (ciphertext, nonce) = encrypt_resource(plaintext, "transaction", nonce);
+
+        let request = make_request(
+            "TRANSACTION.SUCCESS",
+            "AEAD_AES_256_GCM",
+            &ciphertext,
+            &nonce,
+            "transaction",
+        );
+        let data = handler.handle_payment_notify(&request).await.unwrap();
+
+        assert_eq!(data.out_trade_no, "out_20240101");
+        assert_eq!(data.transaction_id, "4200000001");
+        assert_eq!(data.trade_state, "SUCCESS");
+    }
+
+    #[tokio::test]
+    async fn test_handle_refund_notify_decrypts_and_parses() {
+        let handler = test_handler();
+
+        let plaintext = r#"{
+            "mchid": "1900000109",
+            "out_trade_no": "out_20240101",
+            "transaction_id": "4200000001",
+            "out_refund_no": "refund_001",
+            "refund_id": "5000000038",
+            "refund_status": "SUCCESS"
+        }"#;
+        let nonce = "refundnonce1"; // 12 字节
+        let (ciphertext, nonce) = encrypt_resource(plaintext, "refund", nonce);
+
+        let request = make_request(
+            "REFUND.SUCCESS",
+            "AEAD_AES_256_GCM",
+            &ciphertext,
+            &nonce,
+            "refund",
+        );
+        let data = handler.handle_refund_notify(&request).await.unwrap();
+
+        assert_eq!(data.out_refund_no, "refund_001");
+        assert_eq!(data.refund_id, "5000000038");
+        assert_eq!(data.refund_status, "SUCCESS");
+    }
+
+    #[tokio::test]
+    async fn test_handle_payment_notify_rejects_wrong_type() {
+        let handler = test_handler();
+        let request = make_request(
+            "REFUND.SUCCESS",
+            "AEAD_AES_256_GCM",
+            "x",
+            "n",
+            "transaction",
+        );
+        let err = handler.handle_payment_notify(&request).await.unwrap_err();
+        assert!(matches!(err, WxPayError::InvalidNotifyType(_)));
+    }
+
+    #[tokio::test]
+    async fn test_handle_notify_rejects_unsupported_algorithm() {
+        let handler = test_handler();
+        let request = make_request("TRANSACTION.SUCCESS", "RSA-OAEP", "x", "n", "transaction");
+        let err = handler.handle_payment_notify(&request).await.unwrap_err();
+        assert!(matches!(err, WxPayError::DecryptionError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_handle_payment_notify_rejects_tampered_ciphertext() {
+        let handler = test_handler();
+        let nonce = "nonce1234567";
+        let (ciphertext, nonce) = encrypt_resource("{}", "transaction", nonce);
+
+        // 篡改密文：base64 解码后翻转首字节再重新编码，保证 base64 仍合法但 GCM 认证失败。
+        let mut bytes = base64::engine::general_purpose::STANDARD
+            .decode(&ciphertext)
+            .unwrap();
+        bytes[0] ^= 0xff;
+        let tampered = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        let request = make_request(
+            "TRANSACTION.SUCCESS",
+            "AEAD_AES_256_GCM",
+            &tampered,
+            &nonce,
+            "transaction",
+        );
+        let err = handler.handle_payment_notify(&request).await.unwrap_err();
+        assert!(matches!(err, WxPayError::DecryptionError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_verify_notify_signature_delegates_to_verifier() {
+        // 空 verifier 的 verify 会返回错误；这里仅验证签名校验入口正确委托给 verifier。
+        let handler = test_handler();
+        let result = handler
+            .verify_notify_signature("ts", "nonce", "body", "sig")
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_timestamp_validity() {
+        let handler = test_handler();
+        let now = crate::utils::timestamp::get_timestamp();
+
+        // 当前时间戳在 300s 容差内有效。
+        let valid = handler.verify_timestamp(&now.to_string(), 300).unwrap();
+        assert!(valid);
+
+        // 远古时间戳无效。
+        let invalid = handler.verify_timestamp("0", 300).unwrap();
+        assert!(!invalid);
+
+        // 非法时间戳字符串应报错。
+        let bad = handler.verify_timestamp("not-a-number", 300);
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn test_new_rejects_invalid_api_v3_key() {
+        let verifier: Arc<dyn Verifier> = Arc::new(Sha256RsaVerifier::new(vec![]).unwrap());
+        let config = NotifyConfig {
+            api_v3_key: "too-short".to_string(),
+            cert_serial_number: "CERT".to_string(),
+            platform_certificate: vec![],
+        };
+        let result = NotifyHandler::new(config, verifier);
+        assert!(matches!(result, Err(WxPayError::InvalidKey(_))));
     }
 }

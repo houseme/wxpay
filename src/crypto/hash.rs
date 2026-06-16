@@ -165,7 +165,18 @@ pub fn build_sign_message(
     nonce: &str,
     body: &str,
 ) -> String {
-    format!("{}\n{}\n{}\n{}\n{}\n", method, url, timestamp, nonce, body)
+    // 性能优化：预分配容量并用 `write!` 就地格式化，
+    // 相比 `format!` 可省去 `timestamp` 的临时 String 分配。
+    use std::fmt::Write;
+    let mut s = String::with_capacity(
+        method.len() + url.len() + nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 5,
+    );
+    let _ = write!(
+        s,
+        "{}\n{}\n{}\n{}\n{}\n",
+        method, url, timestamp, nonce, body
+    );
+    s
 }
 
 /// 计算 SHA256WithRSA 验签消息格式
@@ -183,7 +194,11 @@ pub fn build_sign_message(
 ///
 /// 返回验签消息字符串
 pub fn build_verify_message(timestamp: i64, nonce: &str, body: &str) -> String {
-    format!("{}\n{}\n{}\n", timestamp, nonce, body)
+    // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时分配。
+    use std::fmt::Write;
+    let mut s = String::with_capacity(nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 3);
+    let _ = write!(s, "{}\n{}\n{}\n", timestamp, nonce, body);
+    s
 }
 
 #[cfg(test)]

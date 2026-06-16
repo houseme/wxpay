@@ -5,6 +5,9 @@
 use rand::RngExt;
 use uuid::Uuid;
 
+/// 小写字母 + 数字字符表（性能优化：使用 `const` 字节表，避免每次调用都分配 `Vec<char>`）。
+const ALPHANUM_LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+
 /// 生成随机 Nonce 字符串
 ///
 /// 使用 UUID v4 生成 32 位随机字符串，用于请求签名中的 nonce_str 字段。
@@ -18,7 +21,9 @@ use uuid::Uuid;
 /// assert_eq!(nonce.len(), 32);
 /// ```
 pub fn generate_nonce() -> String {
-    Uuid::new_v4().to_string().replace('-', "")
+    // 性能优化：使用 `simple()` 直接输出 32 位十六进制串，
+    // 相比 `to_string().replace('-', "")` 减少 1 次堆分配并省去全串扫描。
+    Uuid::new_v4().simple().to_string()
 }
 
 /// 生成指定长度的随机字符串
@@ -39,14 +44,14 @@ pub fn generate_nonce() -> String {
 /// ```
 pub fn generate_random_string(length: usize) -> String {
     let mut rng = rand::rng();
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
-
-    (0..length)
-        .map(|_| {
-            let idx = rng.random_range(0..chars.len());
-            chars[idx]
-        })
-        .collect()
+    // 性能优化：预分配容量，复用 `const` 字节表，避免 `Vec<char>` 分配。
+    let mut s = String::with_capacity(length);
+    for _ in 0..length {
+        let idx = rng.random_range(0..ALPHANUM_LOWER.len());
+        // SAFETY: 字节均来自 ASCII 字符表。
+        s.push(ALPHANUM_LOWER[idx] as char);
+    }
+    s
 }
 
 /// 生成指定长度的随机数字字符串
@@ -68,13 +73,13 @@ pub fn generate_random_string(length: usize) -> String {
 /// ```
 pub fn generate_numeric_string(length: usize) -> String {
     let mut rng = rand::rng();
-
-    (0..length)
-        .map(|_| {
-            let digit = rng.random_range(0..10);
-            char::from(b'0' + digit)
-        })
-        .collect()
+    // 性能优化：预分配容量，逐位 push，避免迭代 collect 的潜在重分配。
+    let mut s = String::with_capacity(length);
+    for _ in 0..length {
+        let digit = rng.random_range(0..10);
+        s.push(char::from(b'0' + digit));
+    }
+    s
 }
 
 #[cfg(test)]

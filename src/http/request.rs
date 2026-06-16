@@ -174,14 +174,24 @@ impl WxPayRequest {
     /// HTTP_METHOD\nURL_PATH\nTIMESTAMP\nNONCE_STR\nBODY\n
     pub fn sign_message(&self) -> String {
         let body = self.body.as_deref().unwrap_or("");
-        format!(
+        // 性能优化：这是每次 API 请求都会调用的热点路径。
+        // 预分配容量并就地格式化时间戳，避免 `format!` 带来的临时 String 分配。
+        use std::fmt::Write;
+        let method = self.method_str();
+        let mut s = String::with_capacity(
+            method.len()
+                + self.path.len()
+                + self.nonce.len()
+                + body.len()
+                + /*timestamp*/ 20
+                + /*换行*/ 5,
+        );
+        let _ = write!(
+            s,
             "{}\n{}\n{}\n{}\n{}\n",
-            self.method_str(),
-            self.path,
-            self.timestamp,
-            self.nonce,
-            body
-        )
+            method, self.path, self.timestamp, self.nonce, body
+        );
+        s
     }
 
     /// 获取完整 URL

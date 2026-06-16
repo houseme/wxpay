@@ -186,7 +186,9 @@ impl AlertGatewayAdapter {
         let jitter = Self::stable_jitter(route_key, self.sample_every);
         let offset = idx - self.burst_threshold;
 
-        offset.saturating_sub(jitter) % self.sample_every == 0
+        offset
+            .saturating_sub(jitter)
+            .is_multiple_of(self.sample_every)
     }
 
     fn stable_jitter(seed: &str, modulo: u64) -> u64 {
@@ -418,7 +420,7 @@ impl AlertGateway for MockAlertGateway {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         calls.push(format!("route={route},endpoint={endpoint},token={token}"));
 
-        let result = script.pop_front().unwrap_or_else(|| Ok(()));
+        let result = script.pop_front().unwrap_or(Ok(()));
         Box::pin(async move { result })
     }
 }
