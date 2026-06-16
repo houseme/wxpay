@@ -3,6 +3,9 @@
 [![Crates.io](https://img.shields.io/crates/v/wxpay-rs.svg)](https://crates.io/crates/wxpay-rs)
 [![Documentation](https://docs.rs/wxpay-rs/badge.svg)](https://docs.rs/wxpay-rs)
 [![License](https://img.shields.io/crates/l/wxpay-rs.svg)](LICENSE)
+[![Crates.io Total Downloads](https://img.shields.io/crates/d/wxpay-rs)](https://crates.io/crates/wxpay-rs)
+[![Build](https://github.com/houseme/wxpay/actions/workflows/Build.yml/badge.svg)](https://github.com/houseme/wxpay/actions/workflows/Build.yml)
+
 
 **微信支付 API v3 的 Rust 实现 SDK**，提供类型安全、高性能的微信支付接口封装。
 
