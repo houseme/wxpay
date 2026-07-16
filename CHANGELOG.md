@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-07-16
+
+- 精简 `tokio` feature 配置，移除 `full`，仅保留 SDK、示例和测试实际需要的运行时能力
+- 精简 `reqwest` feature 配置，移除未使用的 `form` / `query`，保留 JSON、HTTP/2、系统代理、Hickory DNS 与 charset 解码支持
+- 保持 `tls-rustls` 作为默认 crate feature，通过 `reqwest/rustls` 提供 HTTPS/TLS 支持，避免把 TLS 后端硬编码到基础依赖行
+- 更新 `uuid` 到 `1.24`，并刷新锁文件中的相关传递依赖
+
 ## [2.0.1] - 2026-06-16
 
 - 新增 `wiremock` 集成测试（服务端到端签名/分发/解析 + HTTP 5xx 重试）与全模块单元测试，用例数达 200+

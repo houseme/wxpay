@@ -1,6 +1,6 @@
 [package]
 name = "wxpay-rs"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2024"
 authors = ["houseme <housemecn@gmail.com>"]
 description = "WeChat Pay API v3 Rust SDK"

@@ -26,7 +26,7 @@
 
 ```toml
 [dependencies]
-wxpay-rs = "2.0.1"
+wxpay-rs = "2.0.2"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
