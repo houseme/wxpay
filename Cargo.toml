@@ -19,7 +19,7 @@ crate-type = ["lib"]
 
 [dependencies]
 # 异步运行时
-tokio = { version = "1.52", default-features = false, features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tokio = { version = "1.53", default-features = false, features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
 async-trait = "0.1"
 
 # HTTP 客户端
