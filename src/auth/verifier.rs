@@ -130,7 +130,12 @@ impl Sha256RsaVerifier {
     /// 微信支付 API v3 验签格式：
     /// TIMESTAMP\nNONCE_STR\nBODY\n
     pub fn build_verify_message(timestamp: i64, nonce: &str, body: &str) -> String {
-        format!("{}\n{}\n{}\n", timestamp, nonce, body)
+        // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时分配。
+        use std::fmt::Write;
+        let mut s =
+            String::with_capacity(nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 3);
+        let _ = write!(s, "{}\n{}\n{}\n", timestamp, nonce, body);
+        s
     }
 
     /// 使用公钥验证签名

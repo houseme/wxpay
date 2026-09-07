@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 依赖更新
+
+- 更新 `aes-gcm` 到 `0.11.1`、`uuid` 到 `1.26`、`der` 锁定到 `0.8.2`（传递依赖全量刷新：`rustls`、`hyper`、`hickory`、`tokio-rustls` 等）
+- 更新开发依赖 `actix-web` 到 `4.15`
+
+### 性能优化
+
+- `ServiceTransport::build_headers`：每次请求的 `Authorization` 头构建改为预分配容量 + `write!` 就地写入，去除 `format!` 临时分配
+- `Sha256RsaVerifier::build_verify_message`：验签消息构建与签名路径对齐，预分配容量并就地格式化时间戳
+- `ReqwestHttpClient`：POST/PUT/PATCH 请求体由"入参拷贝 + 每次重试再克隆"改为闭包借用 `&str` 按需分配，正常路径减少一次请求体拷贝
+- `ReqwestHttpClient` 构建：启用 `TCP_NODELAY`，避免 Nagle 算法给小 JSON 报文带来的发送延迟
+- `WxPayRequest::full_url`：URL 拼接改为预分配容量直接拼接，去除 `format!` 开销
+- `TransportEvent::alert_key`：告警路由键拼接改为预分配容量就地写入
+- `CertManager`：解析后证书与原始 DER 数据合并到单一 `RwLock` 映射，读写操作从两次加锁降为一次，并保证两份数据的原子一致性
+
+### 完善
+
+- 修正 `User-Agent` 中硬编码的过期版本号，改为编译期注入 `CARGO_PKG_VERSION`
+- 基准测试新增签名/验签消息构建与 URL 拼接路径（`sign_message/build`、`verify_message/build`、`request/full_url`）
+
 ## [2.0.2] - 2026-07-16
 
 - 精简 `tokio` feature 配置，移除 `full`，仅保留 SDK、示例和测试实际需要的运行时能力

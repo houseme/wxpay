@@ -246,6 +246,8 @@ impl ReqwestHttpClientBuilder {
             .timeout(Duration::from_secs(self.timeout))
             .pool_max_idle_per_host(self.max_idle_connections)
             .pool_idle_timeout(Duration::from_secs(self.idle_timeout))
+            // 性能优化：启用 TCP_NODELAY，避免 Nagle 算法给小 JSON 报文带来的发送延迟。
+            .tcp_nodelay(true)
             .build()
             .map_err(|e| WxPayError::InternalError(format!("创建 HTTP 客户端失败：{}", e)))?;
 
@@ -281,11 +283,11 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let body = body.to_string();
-
+        // 性能优化：闭包借用 `&str`，仅在实际发送时分配请求体，
+        // 避免 happy path 上的双重拷贝（`to_string` + 每次 `clone`）。
         self.execute_with_retries(
             move || {
-                let request = self.client.post(url).body(body.clone());
+                let request = self.client.post(url).body(body.to_string());
                 Self::append_headers(request, &headers)
             },
             false,
@@ -299,11 +301,10 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let body = body.to_string();
-
+        // 性能优化：同 post，闭包借用 `&str` 按需分配。
         self.execute_with_retries(
             move || {
-                let request = self.client.put(url).body(body.clone());
+                let request = self.client.put(url).body(body.to_string());
                 Self::append_headers(request, &headers)
             },
             false,
@@ -328,11 +329,10 @@ impl HttpClient for ReqwestHttpClient {
         headers: Vec<(String, String)>,
         body: &str,
     ) -> WxPayResult<HttpResponse> {
-        let body = body.to_string();
-
+        // 性能优化：同 post，闭包借用 `&str` 按需分配。
         self.execute_with_retries(
             move || {
-                let request = self.client.patch(url).body(body.clone());
+                let request = self.client.patch(url).body(body.to_string());
                 Self::append_headers(request, &headers)
             },
             false,

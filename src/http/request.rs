@@ -196,7 +196,11 @@ impl WxPayRequest {
 
     /// 获取完整 URL
     pub fn full_url(&self, base_url: &str) -> String {
-        format!("{}{}", base_url, self.path)
+        // 性能优化：预分配容量直接拼接，避免 `format!` 的格式化开销。
+        let mut s = String::with_capacity(base_url.len() + self.path.len());
+        s.push_str(base_url);
+        s.push_str(&self.path);
+        s
     }
 
     /// 获取请求体

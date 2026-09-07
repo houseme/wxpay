@@ -9,6 +9,14 @@ use x509_cert::Certificate;
 
 use crate::error::{WxPayError, WxPayResult};
 
+/// 证书条目：解析后的证书与原始 DER 数据合并存储，
+/// 单锁读取，避免双锁间的不一致与额外加锁开销。
+#[derive(Clone)]
+struct CertEntry {
+    cert: Certificate,
+    der: Vec<u8>,
+}
+
 /// 证书管理器
 ///
 /// 管理微信支付平台证书，支持证书的存储、查询和自动刷新。
@@ -33,11 +41,8 @@ use crate::error::{WxPayError, WxPayResult};
 /// }
 /// ```
 pub struct CertManager {
-    /// 证书存储（序列号 -> 证书）
-    certificates: Arc<RwLock<HashMap<String, Certificate>>>,
-
-    /// 证书原始数据（序列号 -> DER 格式）
-    cert_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    /// 证书存储（序列号 -> 条目）
+    certificates: Arc<RwLock<HashMap<String, CertEntry>>>,
 }
 
 impl CertManager {
@@ -45,7 +50,6 @@ impl CertManager {
     pub fn new() -> Self {
         Self {
             certificates: Arc::new(RwLock::new(HashMap::new())),
-            cert_data: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -69,11 +73,13 @@ impl CertManager {
         let cert = Certificate::from_der(&cert_der)
             .map_err(|e| WxPayError::CertificateParseError(format!("证书解析失败：{}", e)))?;
 
-        let mut certificates = self.certificates.write().await;
-        let mut cert_data = self.cert_data.write().await;
-
-        certificates.insert(serial_number.clone(), cert);
-        cert_data.insert(serial_number, cert_der);
+        self.certificates.write().await.insert(
+            serial_number,
+            CertEntry {
+                cert,
+                der: cert_der,
+            },
+        );
 
         Ok(())
     }
@@ -88,8 +94,11 @@ impl CertManager {
     ///
     /// 返回证书的克隆
     pub async fn get_certificate(&self, serial_number: &str) -> Option<Certificate> {
-        let certificates = self.certificates.read().await;
-        certificates.get(serial_number).cloned()
+        self.certificates
+            .read()
+            .await
+            .get(serial_number)
+            .map(|entry| entry.cert.clone())
     }
 
     /// 获取证书原始数据
@@ -102,8 +111,11 @@ impl CertManager {
     ///
     /// 返回证书 DER 格式数据的克隆
     pub async fn get_certificate_data(&self, serial_number: &str) -> Option<Vec<u8>> {
-        let cert_data = self.cert_data.read().await;
-        cert_data.get(serial_number).cloned()
+        self.certificates
+            .read()
+            .await
+            .get(serial_number)
+            .map(|entry| entry.der.clone())
     }
 
     /// 获取所有证书序列号
@@ -112,8 +124,7 @@ impl CertManager {
     ///
     /// 返回所有证书序列号的列表
     pub async fn get_serial_numbers(&self) -> Vec<String> {
-        let certificates = self.certificates.read().await;
-        certificates.keys().cloned().collect()
+        self.certificates.read().await.keys().cloned().collect()
     }
 
     /// 移除证书
@@ -126,34 +137,23 @@ impl CertManager {
     ///
     /// 返回移除结果
     pub async fn remove_certificate(&self, serial_number: &str) -> WxPayResult<()> {
-        let mut certificates = self.certificates.write().await;
-        let mut cert_data = self.cert_data.write().await;
-
-        certificates.remove(serial_number);
-        cert_data.remove(serial_number);
-
+        self.certificates.write().await.remove(serial_number);
         Ok(())
     }
 
     /// 清空所有证书
     pub async fn clear(&self) {
-        let mut certificates = self.certificates.write().await;
-        let mut cert_data = self.cert_data.write().await;
-
-        certificates.clear();
-        cert_data.clear();
+        self.certificates.write().await.clear();
     }
 
     /// 获取证书数量
     pub async fn count(&self) -> usize {
-        let certificates = self.certificates.read().await;
-        certificates.len()
+        self.certificates.read().await.len()
     }
 
     /// 检查证书是否存在
     pub async fn has_certificate(&self, serial_number: &str) -> bool {
-        let certificates = self.certificates.read().await;
-        certificates.contains_key(serial_number)
+        self.certificates.read().await.contains_key(serial_number)
     }
 }
 
@@ -175,7 +175,6 @@ impl Clone for CertManager {
     fn clone(&self) -> Self {
         Self {
             certificates: self.certificates.clone(),
-            cert_data: self.cert_data.clone(),
         }
     }
 }

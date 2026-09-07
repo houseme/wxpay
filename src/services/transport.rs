@@ -9,6 +9,9 @@ use crate::error::{WxPayAlertLevel, WxPayError, WxPayErrorKind, WxPayResult};
 use crate::http::client::HttpResponse;
 use crate::http::{HttpClient, HttpMethod, RequestBuilder, ResponseHandler};
 
+/// User-Agent 常量（编译期拼入 crate 版本，避免每次请求重复格式化）。
+const USER_AGENT: &str = concat!("wxpay-rs/", env!("CARGO_PKG_VERSION"));
+
 /// 统一服务请求执行器
 #[derive(Debug)]
 pub struct TransportEvent {
@@ -112,7 +115,13 @@ impl TransportEvent {
 
     /// 统一告警路由键（告警系统规则直接引用）
     pub fn alert_key(&self) -> String {
-        format!("{}.{}", self.alert_level.as_str(), self.alert_policy)
+        // 性能优化：预分配容量就地拼接，避免 `format!` 的额外开销。
+        let level = self.alert_level.as_str();
+        let mut s = String::with_capacity(level.len() + 1 + self.alert_policy.len());
+        s.push_str(level);
+        s.push('.');
+        s.push_str(&self.alert_policy);
+        s
     }
 
     /// 是否建议立即触发告警（用于结构化日志策略）
@@ -186,18 +195,32 @@ impl ServiceTransport {
     ) -> Vec<(String, String)> {
         let mut headers = request.headers_vec();
 
-        let authorization = format!(
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
-            self.config.merchant_id,
-            request.nonce,
-            request.timestamp,
-            self.config.cert_serial_number,
-            signature
-        );
+        // 性能优化：预分配容量并就地写入，避免 `format!` 为时间戳等产生的临时分配。
+        use std::fmt::Write;
+        let authorization = {
+            let mut s = String::with_capacity(
+                /*前缀与分隔符*/ 72
+                    + self.config.merchant_id.len()
+                    + request.nonce.len()
+                    + self.config.cert_serial_number.len()
+                    + signature.len()
+                    + /*timestamp*/ 20,
+            );
+            let _ = write!(
+                s,
+                r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
+                self.config.merchant_id,
+                request.nonce,
+                request.timestamp,
+                self.config.cert_serial_number,
+                signature
+            );
+            s
+        };
 
         headers.push(("Authorization".to_string(), authorization));
         headers.push(("Accept".to_string(), "application/json".to_string()));
-        headers.push(("User-Agent".to_string(), "wxpay-rs/0.1.0".to_string()));
+        headers.push(("User-Agent".to_string(), USER_AGENT.to_string()));
 
         if matches!(
             method,

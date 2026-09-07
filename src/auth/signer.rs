@@ -232,9 +232,7 @@ mod tests {
         // 性能优化回归：与 format! 产物逐字节等价。
         assert_eq!(
             message,
-            format!(
-                "POST\n/v3/pay/transactions/jsapi\n1609459200\ntest_nonce\n{{\"app_id\":\"wx88888888\"}}\n"
-            )
+            "POST\n/v3/pay/transactions/jsapi\n1609459200\ntest_nonce\n{\"app_id\":\"wx88888888\"}\n"
         );
     }
 

@@ -10,8 +10,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tokio::runtime::Runtime;
-use wxpay_rs::auth::{Sha256RsaSigner, Signer};
+use wxpay_rs::auth::{Sha256RsaSigner, Sha256RsaVerifier, Signer};
 use wxpay_rs::crypto::{Aes256GcmCipher, hash};
+use wxpay_rs::http::RequestBuilder;
+use wxpay_rs::http::request::HttpMethod;
 use wxpay_rs::utils::nonce::generate_nonce;
 
 /// APIv3 演示密钥（恰好 32 字符）。
@@ -77,11 +79,42 @@ fn bench_rsa_sign(c: &mut Criterion) {
     });
 }
 
+fn bench_message_building(c: &mut Criterion) {
+    let body = r#"{"app_id":"wx88888888","mchid":"1900000109","amount":{"total":100}}"#;
+    let nonce = "5b8c9b0a3f4e4d2c8a1b2c3d4e5f6a7b";
+
+    c.bench_function("sign_message/build", |b| {
+        b.iter(|| {
+            black_box(Sha256RsaSigner::build_sign_message(
+                "POST",
+                "/v3/pay/transactions/jsapi",
+                1_700_000_000,
+                black_box(nonce),
+                black_box(body),
+            ))
+        })
+    });
+    c.bench_function("verify_message/build", |b| {
+        b.iter(|| {
+            black_box(Sha256RsaVerifier::build_verify_message(
+                1_700_000_000,
+                black_box(nonce),
+                black_box(body),
+            ))
+        })
+    });
+    c.bench_function("request/full_url", |b| {
+        let request = RequestBuilder::new(HttpMethod::Post, "/v3/pay/transactions/jsapi").build();
+        b.iter(|| black_box(request.full_url("https://api.mch.weixin.qq.com")))
+    });
+}
+
 criterion_group!(
     benches,
     bench_hashes,
     bench_nonce,
     bench_aes,
-    bench_rsa_sign
+    bench_rsa_sign,
+    bench_message_building
 );
 criterion_main!(benches);
