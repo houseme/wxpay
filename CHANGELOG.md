@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 安全与依赖
+
+- 移除 `webhook_actix.rs` 示例及 `actix-web` 开发依赖（功能由等价的 `webhook_axum.rs` 覆盖），
+  消除 dev-dependency 链 `actix-web → actix-http → h2 0.3.27` 引入的
+  RUSTSEC-2026-0258（h2 unbounded empty DATA frames）告警，锁文件瘦身约 500 行（-48 个传递依赖）
+- `cargo shear` 复核确认无其他未使用依赖
+
 ### 依赖更新
 
 - 更新 `aes-gcm` 到 `0.11.1`、`uuid` 到 `1.26`、`der` 锁定到 `0.8.2`（传递依赖全量刷新：`rustls`、`hyper`、`hickory`、`tokio-rustls` 等）

@@ -37,7 +37,6 @@ serde_json = "1"
 如果你是从 `wechatpay-apiv3/wechatpay-go` 迁移过来，或者准备直接接入支付/退款回调，可以先看这几份材料：
 
 - [examples/webhook_axum.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_axum.rs:1)：`Axum` 支付/退款回调可编译骨架
-- [examples/webhook_actix.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_actix.rs:1)：`Actix-Web` 支付/退款回调可编译骨架
 - [.env.example](/Users/zhi/Documents/code/rust/houseme/wxpay/.env.example:1)：本地联调所需环境变量模板
 
 常见启动方式：
@@ -47,9 +46,6 @@ cp .env.example .env
 
 # Axum
 cargo run --example webhook_axum
-
-# Actix-Web
-cargo run --example webhook_actix
 ```
 
 ### Go 风格兼容入口
