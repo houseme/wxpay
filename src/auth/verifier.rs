@@ -132,8 +132,7 @@ impl Sha256RsaVerifier {
     pub fn build_verify_message(timestamp: i64, nonce: &str, body: &str) -> String {
         // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时分配。
         use std::fmt::Write;
-        let mut s =
-            String::with_capacity(nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 3);
+        let mut s = String::with_capacity(nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 3);
         let _ = write!(s, "{}\n{}\n{}\n", timestamp, nonce, body);
         s
     }

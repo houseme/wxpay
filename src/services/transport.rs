@@ -199,7 +199,8 @@ impl ServiceTransport {
         use std::fmt::Write;
         let authorization = {
             let mut s = String::with_capacity(
-                /*前缀与分隔符*/ 72
+                /*前缀与分隔符*/
+                72
                     + self.config.merchant_id.len()
                     + request.nonce.len()
                     + self.config.cert_serial_number.len()
