@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 依赖更新
 
+- 刷新 23 个兼容版本的锁定依赖，包括 `thiserror 2.0.21`、`hyper-util 0.1.21`、
+  `tokio-rustls 0.26.6`、`rustls-platform-verifier 0.7.1` 与 `zerocopy 0.8.59`；
+  移除不再使用的 `multiversion`、`multiversion-macros` 传递依赖
 - 更新 `aes-gcm` 到 `0.11.1`、`uuid` 到 `1.26`、`der` 锁定到 `0.8.2`（传递依赖全量刷新：`rustls`、`hyper`、`hickory`、`tokio-rustls` 等）
 - 更新开发依赖 `actix-web` 到 `4.15`
 
