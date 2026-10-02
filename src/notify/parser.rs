@@ -9,7 +9,8 @@ use crate::notify::handler::{NotifyRequest, NotifyResource};
 
 /// 通知解析器
 ///
-/// 用于解析微信支付回调通知。
+/// 只解析 JSON，不验证来源或签名。HTTP 回调请使用
+/// [`crate::notify::NotifyHandler::verify_and_parse`]。
 ///
 /// # 示例
 ///
@@ -19,7 +20,7 @@ use crate::notify::handler::{NotifyRequest, NotifyResource};
 /// let body = r#"{
 ///     "id": "EV-2018022511223320873",
 ///     "create_time": "2015-05-20T13:29:35+08:00",
-///     "type": "TRANSACTION.SUCCESS",
+///     "event_type": "TRANSACTION.SUCCESS",
 ///     "resource": {
 ///         "algorithm": "AEAD_AES_256_GCM",
 ///         "ciphertext": "...",
@@ -74,7 +75,7 @@ impl NotifyParser {
     pub fn get_notify_type(body: &str) -> WxPayResult<String> {
         #[derive(Deserialize)]
         struct NotifyType {
-            #[serde(rename = "type")]
+            #[serde(rename = "event_type", alias = "type")]
             notify_type: String,
         }
 
@@ -180,7 +181,7 @@ mod tests {
         let body = r#"{
             "id": "EV-2018022511223320873",
             "create_time": "2015-05-20T13:29:35+08:00",
-            "type": "TRANSACTION.SUCCESS",
+            "event_type": "TRANSACTION.SUCCESS",
             "resource": {
                 "algorithm": "AEAD_AES_256_GCM",
                 "ciphertext": "...",
@@ -199,7 +200,7 @@ mod tests {
         let body = r#"{
             "id": "EV-2018022511223320873",
             "create_time": "2015-05-20T13:29:35+08:00",
-            "type": "TRANSACTION.SUCCESS",
+            "event_type": "TRANSACTION.SUCCESS",
             "resource": {
                 "algorithm": "AEAD_AES_256_GCM",
                 "ciphertext": "...",
@@ -217,7 +218,7 @@ mod tests {
         let body = r#"{
             "id": "EV-2018022511223320873",
             "create_time": "2015-05-20T13:29:35+08:00",
-            "type": "TRANSACTION.SUCCESS",
+            "event_type": "TRANSACTION.SUCCESS",
             "resource": {
                 "algorithm": "AEAD_AES_256_GCM",
                 "ciphertext": "...",
@@ -235,7 +236,7 @@ mod tests {
         let body = r#"{
             "id": "EV-2018022511223320873",
             "create_time": "2015-05-20T13:29:35+08:00",
-            "type": "TRANSACTION.SUCCESS",
+            "event_type": "TRANSACTION.SUCCESS",
             "resource": {
                 "algorithm": "AEAD_AES_256_GCM",
                 "ciphertext": "...",

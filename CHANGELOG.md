@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 回调通知
+
+- 通知模型对齐 `event_type`，保留旧 `type` 的输入兼容；支持退款成功、异常、关闭事件
+- 新增 `NotifyHeaders`、`VerifiedNotifyRequest` 与 `verify_and_parse`，先校验完整签名头、
+  原始请求体、平台序列号及 300 秒时效，再解密并核对事件状态
+- 提供支付及退款订单、金额、商户和应用一致性核对方法；低层解密入口不再被描述为完整验签流程
+- 时间戳校验拒绝极值及负容差，避免整数溢出；复用通知配置和 AES cipher
+- Axum 示例保留原始 Bytes，拒绝缺失或重复签名头，失败返回非 2xx；只有业务持久化成功才返回 204。
+  示例的接收事务入口默认返回 503，接入方必须补充幂等订单事务后启用成功应答
+
 ### 密钥、证书与加密
 
 - 使用 `aws-lc-rs` 替换 RSA 运算后端，移除命中 RUSTSEC-2023-0071 的 `rsa` 及相关传递依赖；

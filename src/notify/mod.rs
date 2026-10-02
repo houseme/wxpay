@@ -5,5 +5,7 @@
 pub mod handler;
 pub mod parser;
 
-pub use handler::NotifyHandler;
+pub use handler::{
+    NotifyHandler, NotifyHeaders, PaymentExpectation, RefundExpectation, VerifiedNotifyRequest,
+};
 pub use parser::NotifyParser;

@@ -10,6 +10,49 @@ use crate::config::NotifyConfig;
 use crate::crypto::Aes256GcmCipher;
 use crate::error::{WxPayError, WxPayResult};
 
+/// 回调签名所需的四个原始 HTTP 头；每一项都必须存在且非空。
+#[derive(Clone, Copy)]
+pub struct NotifyHeaders<'a> {
+    pub timestamp: &'a str,
+    pub nonce: &'a str,
+    pub serial: &'a str,
+    pub signature: &'a str,
+}
+
+/// 已通过时间窗口检查及平台验签的通知。
+///
+/// 只能由 [`NotifyHandler::verify_and_parse`] 创建。验签不代替数据库中的
+/// 订单核对、通知去重或业务状态变更事务。
+#[derive(Debug, Clone)]
+pub struct VerifiedNotifyRequest(NotifyRequest);
+
+impl VerifiedNotifyRequest {
+    /// 只读访问已验签的通知元数据。
+    pub fn request(&self) -> &NotifyRequest {
+        &self.0
+    }
+}
+
+/// 从本地订单读取的支付期望值；金额为订单总金额，不是优惠后的实付金额。
+#[derive(Debug, Clone, Copy)]
+pub struct PaymentExpectation<'a> {
+    pub appid: &'a str,
+    pub mchid: &'a str,
+    pub out_trade_no: &'a str,
+    pub total: u64,
+    pub currency: &'a str,
+}
+
+/// 从本地退款单及原订单读取的期望值。
+#[derive(Debug, Clone, Copy)]
+pub struct RefundExpectation<'a> {
+    pub mchid: &'a str,
+    pub out_trade_no: &'a str,
+    pub out_refund_no: &'a str,
+    pub total: u64,
+    pub refund: u64,
+}
+
 /// 通知请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotifyRequest {
@@ -20,7 +63,7 @@ pub struct NotifyRequest {
     pub create_time: String,
 
     /// 通知类型
-    #[serde(rename = "type")]
+    #[serde(rename = "event_type", alias = "type")]
     pub notify_type: String,
 
     /// 通知数据
@@ -83,6 +126,37 @@ pub struct PaymentNotifyData {
     pub amount: Option<NotifyAmount>,
 }
 
+impl PaymentNotifyData {
+    /// 核对本地订单的商户、应用、订单号、总金额和币种。
+    ///
+    /// 调用方必须在订单状态事务中调用，并落实重复通知的幂等处理。
+    pub fn validate_order(&self, expected: PaymentExpectation<'_>) -> WxPayResult<()> {
+        let amount = self
+            .amount
+            .as_ref()
+            .ok_or_else(|| WxPayError::InvalidNotifyFormat("支付通知缺少 amount".to_string()))?;
+        if expected.appid.is_empty()
+            || expected.mchid.is_empty()
+            || expected.out_trade_no.is_empty()
+            || expected.total == 0
+            || expected.currency.is_empty()
+            || self.appid != expected.appid
+            || self.mchid != expected.mchid
+            || self.out_trade_no != expected.out_trade_no
+            || self.trade_state != "SUCCESS"
+            || self.transaction_id.is_empty()
+            || amount.total != expected.total
+            || amount.currency != expected.currency
+            || amount.payer_total.is_some_and(|paid| paid > amount.total)
+        {
+            return Err(WxPayError::BusinessError(
+                "支付通知与本地订单不匹配".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// 通知支付者
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotifyPayer {
@@ -134,6 +208,41 @@ pub struct RefundNotifyData {
     pub amount: Option<RefundNotifyAmount>,
 }
 
+impl RefundNotifyData {
+    /// 核对本地退款单；退款成功、异常和关闭均需由业务层分别处理。
+    pub fn validate_order(&self, expected: RefundExpectation<'_>) -> WxPayResult<()> {
+        let amount = self
+            .amount
+            .as_ref()
+            .ok_or_else(|| WxPayError::InvalidNotifyFormat("退款通知缺少 amount".to_string()))?;
+        if expected.mchid.is_empty()
+            || expected.out_trade_no.is_empty()
+            || expected.out_refund_no.is_empty()
+            || expected.refund == 0
+            || expected.refund > expected.total
+            || self.mchid != expected.mchid
+            || self.out_trade_no != expected.out_trade_no
+            || self.out_refund_no != expected.out_refund_no
+            || self.refund_id.is_empty()
+            || self.transaction_id.is_empty()
+            || !matches!(
+                self.refund_status.as_str(),
+                "SUCCESS" | "ABNORMAL" | "CLOSED"
+            )
+            || amount.total != expected.total
+            || amount.refund != expected.refund
+            || amount.payer_total > amount.total
+            || amount.payer_refund > amount.refund
+            || amount.payer_refund > amount.payer_total
+        {
+            return Err(WxPayError::BusinessError(
+                "退款通知与本地退款单不匹配".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// 退款通知金额
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefundNotifyAmount {
@@ -180,15 +289,16 @@ pub struct RefundNotifyAmount {
 ///     Ok(())
 /// }
 /// ```
+#[derive(Clone)]
 pub struct NotifyHandler {
     /// 通知配置
-    config: NotifyConfig,
+    config: Arc<NotifyConfig>,
 
     /// 验签器
     verifier: Arc<dyn Verifier>,
 
     /// AES 加密器
-    cipher: Aes256GcmCipher,
+    cipher: Arc<Aes256GcmCipher>,
 }
 
 impl NotifyHandler {
@@ -196,13 +306,99 @@ impl NotifyHandler {
     pub fn new(config: NotifyConfig, verifier: Arc<dyn Verifier>) -> WxPayResult<Self> {
         let cipher = Aes256GcmCipher::new(&config.api_v3_key)?;
         Ok(Self {
-            config,
+            config: Arc::new(config),
             verifier,
-            cipher,
+            cipher: Arc::new(cipher),
         })
     }
 
-    /// 处理支付通知
+    /// 按原始请求体验签，检查前后 300 秒的时间窗口，然后解析通知。
+    ///
+    /// `body` 必须是 HTTP 收到的完整原始字节，不能重新序列化 JSON。
+    /// 四个签名头都必填；使用 `serial` 指定的平台证书或公钥验签。
+    /// 这限制旧报文重放，窗口内的重复通知仍需由业务数据库进行幂等处理。
+    pub async fn verify_and_parse(
+        &self,
+        headers: NotifyHeaders<'_>,
+        body: &[u8],
+    ) -> WxPayResult<VerifiedNotifyRequest> {
+        for (name, value) in [
+            ("Wechatpay-Timestamp", headers.timestamp),
+            ("Wechatpay-Nonce", headers.nonce),
+            ("Wechatpay-Serial", headers.serial),
+            ("Wechatpay-Signature", headers.signature),
+        ] {
+            if value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()) {
+                return Err(WxPayError::InvalidNotifyFormat(format!(
+                    "缺失或无效的 {name}"
+                )));
+            }
+        }
+        if !headers.timestamp.bytes().all(|byte| byte.is_ascii_digit())
+            || !self.verify_timestamp(headers.timestamp, 300)?
+        {
+            return Err(WxPayError::NotifySignatureVerificationFailed);
+        }
+        let body = std::str::from_utf8(body)
+            .map_err(|_| WxPayError::InvalidNotifyFormat("通知必须是 UTF-8 JSON".to_string()))?;
+        let message = format!("{}\n{}\n{}\n", headers.timestamp, headers.nonce, body);
+        if !self
+            .verifier
+            .verify_with_serial(&message, headers.signature, headers.serial)
+            .await?
+        {
+            return Err(WxPayError::NotifySignatureVerificationFailed);
+        }
+        let request = super::parser::NotifyParser::parse(body)?;
+        if request.id.is_empty()
+            || request.create_time.is_empty()
+            || request.notify_type.is_empty()
+            || request.resource.ciphertext.is_empty()
+            || request.resource.nonce.is_empty()
+            || request.resource.algorithm != "AEAD_AES_256_GCM"
+        {
+            return Err(WxPayError::InvalidNotifyFormat(
+                "通知字段缺失或加密算法不受支持".to_string(),
+            ));
+        }
+        Ok(VerifiedNotifyRequest(request))
+    }
+
+    /// 解密已验签的支付通知并检查事件状态；随后必须核对本地订单并持久化接收结果。
+    pub async fn handle_verified_payment_notify(
+        &self,
+        request: &VerifiedNotifyRequest,
+    ) -> WxPayResult<PaymentNotifyData> {
+        let data = self.handle_payment_notify(request.request()).await?;
+        if data.trade_state != "SUCCESS" || data.amount.is_none() {
+            return Err(WxPayError::InvalidNotifyFormat(
+                "支付事件状态或金额无效".to_string(),
+            ));
+        }
+        Ok(data)
+    }
+
+    /// 解密已验签的退款通知，并确认事件类型与解密后的退款状态一致。
+    pub async fn handle_verified_refund_notify(
+        &self,
+        request: &VerifiedNotifyRequest,
+    ) -> WxPayResult<RefundNotifyData> {
+        let data = self.handle_refund_notify(request.request()).await?;
+        if request.request().notify_type.strip_prefix("REFUND.")
+            != Some(data.refund_status.as_str())
+            || data.amount.is_none()
+        {
+            return Err(WxPayError::InvalidNotifyFormat(
+                "退款事件状态或金额无效".to_string(),
+            ));
+        }
+        Ok(data)
+    }
+
+    /// 解密、解析支付通知（底层入口，不执行验签或防重放检查）。
+    ///
+    /// HTTP 回调请先调用 [`Self::verify_and_parse`]，再调用
+    /// [`Self::handle_verified_payment_notify`]。业务幂等和订单核对由调用方负责。
     pub async fn handle_payment_notify(
         &self,
         request: &NotifyRequest,
@@ -221,13 +417,18 @@ impl NotifyHandler {
         Ok(payment_data)
     }
 
-    /// 处理退款通知
+    /// 解密、解析退款通知（底层入口，不执行验签或防重放检查）。
+    ///
+    /// HTTP 回调请使用 [`Self::verify_and_parse`] 和 [`Self::handle_verified_refund_notify`]。
     pub async fn handle_refund_notify(
         &self,
         request: &NotifyRequest,
     ) -> WxPayResult<RefundNotifyData> {
         // 验证通知类型
-        if request.notify_type != "REFUND.SUCCESS" {
+        if !matches!(
+            request.notify_type.as_str(),
+            "REFUND.SUCCESS" | "REFUND.ABNORMAL" | "REFUND.CLOSED"
+        ) {
             return Err(WxPayError::InvalidNotifyType(request.notify_type.clone()));
         }
 
@@ -260,7 +461,9 @@ impl NotifyHandler {
         }
     }
 
-    /// 验证通知签名
+    /// 仅验证通知签名（底层兼容入口，不校验时间窗口，也不按 serial 选择公钥）。
+    ///
+    /// HTTP 回调应使用 [`Self::verify_and_parse`]，并传入未经重新序列化的原始请求体。
     pub async fn verify_notify_signature(
         &self,
         timestamp: &str,

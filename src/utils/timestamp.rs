@@ -138,13 +138,20 @@ pub fn datetime_to_timestamp(dt: &DateTime<Utc>) -> i64 {
 /// ```
 pub fn is_timestamp_valid(timestamp: i64, tolerance_seconds: i64) -> bool {
     let now = Utc::now().timestamp();
-    let diff = (now - timestamp).abs();
-    diff <= tolerance_seconds
+    tolerance_seconds >= 0 && now.abs_diff(timestamp) <= tolerance_seconds as u64
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timestamp_extremes_and_negative_tolerance_are_rejected() {
+        assert!(!is_timestamp_valid(i64::MIN, 300));
+        assert!(!is_timestamp_valid(i64::MAX, 300));
+        assert!(!is_timestamp_valid(get_timestamp(), -1));
+        assert!(!is_timestamp_valid(i64::MIN, i64::MAX));
+    }
 
     #[test]
     fn test_get_timestamp() {
