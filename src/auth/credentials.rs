@@ -10,7 +10,7 @@ use crate::config::WxPayConfig;
 /// 微信支付凭证
 ///
 /// 封装了商户号、应用 ID 等凭证信息。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Credentials {
     /// 应用 ID
     app_id: String,
@@ -23,6 +23,17 @@ pub struct Credentials {
 
     /// 证书序列号
     cert_serial_number: String,
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("app_id", &self.app_id)
+            .field("merchant_id", &self.merchant_id)
+            .field("api_v3_key", &"[REDACTED]")
+            .field("cert_serial_number", &self.cert_serial_number)
+            .finish()
+    }
 }
 
 impl Credentials {

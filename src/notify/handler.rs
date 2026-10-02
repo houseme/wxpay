@@ -320,11 +320,7 @@ mod tests {
 
     /// 用真实 AES-256-GCM 加密一段支付通知明文，返回可被 NotifyRequest 引用的字段值。
     fn encrypt_resource(plaintext: &str, associated_data: &str, nonce: &str) -> (String, String) {
-        let mut hasher = sha2::Sha256::new();
-        use sha2::Digest;
-        hasher.update(API_V3_KEY.as_bytes());
-        let key = hasher.finalize();
-        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let cipher = Aes256Gcm::new_from_slice(API_V3_KEY.as_bytes()).unwrap();
         let nonce_bytes: [u8; 12] = nonce.as_bytes().try_into().unwrap();
         let nonce_value = Nonce::from(nonce_bytes);
         let ct = cipher

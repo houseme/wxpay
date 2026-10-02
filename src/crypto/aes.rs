@@ -50,21 +50,20 @@ impl Aes256GcmCipher {
     ///
     /// 返回加密器实例
     pub fn new(api_v3_key: &str) -> WxPayResult<Self> {
+        Self::from_key(api_v3_key.as_bytes())
+    }
+
+    /// 读取旧版本 SDK 使用 SHA256 派生密钥保存的数据。
+    ///
+    /// 仅用于迁移 SDK 2.0.2 及之前自行加密的数据，不能用于微信支付通知或证书。
+    /// 解密后请使用 [`Self::new`] 创建的加密器重新加密；不自动尝试旧密钥。
+    pub fn from_legacy_sha256_key(api_v3_key: &str) -> WxPayResult<Self> {
         if api_v3_key.len() != 32 {
             return Err(WxPayError::InvalidKey(
-                "API v3 密钥必须是 32 个字符".to_string(),
+                "API v3 密钥必须是 32 字节".to_string(),
             ));
         }
-
-        // 使用 SHA256 哈希生成 32 字节密钥
-        let mut hasher = Sha256::new();
-        hasher.update(api_v3_key.as_bytes());
-        let key = hasher.finalize();
-
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| WxPayError::InvalidKey(format!("创建 AES 密钥失败：{}", e)))?;
-
-        Ok(Self { cipher })
+        Self::from_key(&Sha256::digest(api_v3_key.as_bytes()))
     }
 
     /// 从原始密钥创建加密器
@@ -241,6 +240,50 @@ impl std::fmt::Debug for Aes256GcmCipher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Generated independently with Node.js crypto.createCipheriv("aes-256-gcm", raw_key, nonce),
+    // setAAD("notification"), and ciphertext || getAuthTag().
+    const RAW_KEY_VECTOR: &str = "bsB3IviGmkJTurfQw77u6O40plGnbppmmjdnKdEL4L/bsfg5FMERIRk78GM=";
+    const LEGACY_VECTOR: &str = "phxVQ7CV8lwGLDe76jsYEpNL0eacxB1LMYQNS0H1tKVqvFNQH3121MJkmFs=";
+
+    #[test]
+    fn decrypts_independent_raw_api_v3_key_vector() {
+        let cipher = Aes256GcmCipher::new("abcdefghijklmnopqrstuvwxyz123456").unwrap();
+        assert_eq!(
+            cipher
+                .decrypt_notification("testnonce123", RAW_KEY_VECTOR, "notification")
+                .unwrap(),
+            r#"{"out_trade_no":"123456789"}"#,
+        );
+    }
+
+    #[test]
+    fn requires_explicit_legacy_cipher_for_stored_hashed_key_data() {
+        let key = "abcdefghijklmnopqrstuvwxyz123456";
+        assert!(
+            Aes256GcmCipher::new(key)
+                .unwrap()
+                .decrypt_notification("testnonce123", LEGACY_VECTOR, "notification")
+                .is_err()
+        );
+        assert_eq!(
+            Aes256GcmCipher::from_legacy_sha256_key(key)
+                .unwrap()
+                .decrypt_notification("testnonce123", LEGACY_VECTOR, "notification")
+                .unwrap(),
+            r#"{"out_trade_no":"123456789"}"#
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_associated_data_in_external_vector() {
+        let cipher = Aes256GcmCipher::new("abcdefghijklmnopqrstuvwxyz123456").unwrap();
+        assert!(
+            cipher
+                .decrypt_notification("testnonce123", RAW_KEY_VECTOR, "different")
+                .is_err()
+        );
+    }
 
     #[test]
     fn test_aes_encrypt_decrypt() {

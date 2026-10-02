@@ -7,8 +7,8 @@
 //! 运行全部：`cargo bench`
 //! 仅运行本组：`cargo bench --bench crypto`
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::{hint::black_box, sync::Arc};
 use tokio::runtime::Runtime;
 use wxpay_rs::auth::{Sha256RsaSigner, Sha256RsaVerifier, Signer};
 use wxpay_rs::crypto::{Aes256GcmCipher, hash};
@@ -79,6 +79,43 @@ fn bench_rsa_sign(c: &mut Criterion) {
     });
 }
 
+/// Includes queueing and blocking-pool scheduling, as seen by callers. Keep the signer
+/// and runtime alive across iterations so measurements do not include key parsing.
+fn bench_concurrent_rsa_sign(c: &mut Criterion) {
+    let runtime = Runtime::new().expect("tokio runtime");
+    let signer = Arc::new(
+        Sha256RsaSigner::new("1900000109", TEST_PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
+            .expect("signer")
+            .with_signing_capacity(4, 64)
+            .expect("signing capacity"),
+    );
+    let mut group = c.benchmark_group("rsa_sha256/concurrent_4_workers");
+    for requests in [8_u64, 32] {
+        group.throughput(Throughput::Elements(requests));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(requests),
+            &requests,
+            |b, &requests| {
+                b.iter(|| {
+                    runtime.block_on(async {
+                        let mut tasks = tokio::task::JoinSet::new();
+                        for _ in 0..requests {
+                            let signer = Arc::clone(&signer);
+                            tasks.spawn(
+                                async move { signer.sign(black_box(CANONICAL_MESSAGE)).await },
+                            );
+                        }
+                        while let Some(result) = tasks.join_next().await {
+                            black_box(result.expect("signing task").expect("signature"));
+                        }
+                    })
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_message_building(c: &mut Criterion) {
     let body = r#"{"app_id":"wx88888888","mchid":"1900000109","amount":{"total":100}}"#;
     let nonce = "5b8c9b0a3f4e4d2c8a1b2c3d4e5f6a7b";
@@ -115,6 +152,7 @@ criterion_group!(
     bench_nonce,
     bench_aes,
     bench_rsa_sign,
+    bench_concurrent_rsa_sign,
     bench_message_building
 );
 criterion_main!(benches);

@@ -3,11 +3,12 @@
 //! 提供请求签名功能，使用 SHA256-RSA 算法。
 
 use async_trait::async_trait;
+use aws_lc_rs::{rand::SystemRandom, rsa::KeyPair, signature::RSA_PKCS1_SHA256};
 use base64::Engine;
-use rsa::pkcs1::DecodeRsaPrivateKey;
-use rsa::pkcs8::DecodePrivateKey;
-use rsa::{Pkcs1v15Sign, RsaPrivateKey};
-use sha2::{Digest, Sha256};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+
+use crate::crypto::rsa::parse_rsa_private_key;
 
 use crate::error::{WxPayError, WxPayResult};
 
@@ -38,6 +39,9 @@ pub trait Signer: Send + Sync {
 ///
 /// 使用 SHA256WithRSA 算法生成请求签名。
 ///
+/// 私钥计算在 Tokio blocking 线程执行，须在 Tokio 运行时内调用。
+/// 默认最多排队 64 个请求；可用 [`Self::with_signing_capacity`] 调整并发与队列容量。
+///
 /// # 示例
 ///
 /// ```rust,no_run
@@ -60,7 +64,11 @@ pub struct Sha256RsaSigner {
     /// 商户号
     merchant_id: String,
     /// 商户私钥
-    private_key: RsaPrivateKey,
+    private_key: Arc<KeyPair>,
+    /// 同时执行签名的任务数（等待时不会占用 Tokio blocking 线程）。
+    workers: Arc<Semaphore>,
+    /// 执行和等待总容量；超出时拒绝，避免无界积压。
+    admission: Arc<Semaphore>,
     /// 证书序列号
     cert_serial_number: String,
 }
@@ -82,32 +90,39 @@ impl Sha256RsaSigner {
         private_key_pem: &[u8],
         cert_serial_number: impl Into<String>,
     ) -> WxPayResult<Self> {
-        let private_key = Self::parse_private_key(private_key_pem)?;
+        let private_key = parse_rsa_private_key(private_key_pem)?;
+        let workers = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(32);
         Ok(Self {
             merchant_id: merchant_id.into(),
-            private_key,
+            private_key: Arc::new(private_key),
+            workers: Arc::new(Semaphore::new(workers)),
+            admission: Arc::new(Semaphore::new(workers + 64)),
             cert_serial_number: cert_serial_number.into(),
         })
     }
 
-    /// 解析私钥
-    fn parse_private_key(pem: &[u8]) -> WxPayResult<RsaPrivateKey> {
-        let pem_str = std::str::from_utf8(pem)
-            .map_err(|e| WxPayError::InvalidPrivateKey(format!("无效的 UTF-8 编码：{}", e)))?;
-
-        // 尝试 PKCS#8 格式
-        if let Ok(key) = RsaPrivateKey::from_pkcs8_pem(pem_str) {
-            return Ok(key);
-        }
-
-        // 尝试 PKCS#1 格式
-        if let Ok(key) = RsaPrivateKey::from_pkcs1_pem(pem_str) {
-            return Ok(key);
-        }
-
-        Err(WxPayError::InvalidPrivateKey(
-            "无法解析私钥，请确保是有效的 PKCS#8 或 PKCS#1 PEM 格式".to_string(),
-        ))
+    /// 配置此签名器的并行计算数与等待容量。
+    ///
+    /// 默认并行数为可用 CPU 数（最多 32），最多额外排队 64 个调用。
+    /// 超过总容量立即返回 `SignError`；等待许可期间不会复制消息或提交 blocking 任务。
+    /// 已开始的 RSA 操作无法取消，调用方取消后仍会持有许可直到计算完成。
+    /// 必须在 Tokio 运行时内调用 [`Signer::sign`]。
+    pub fn with_signing_capacity(
+        mut self,
+        max_concurrent: usize,
+        max_queued: usize,
+    ) -> WxPayResult<Self> {
+        let total = max_concurrent
+            .checked_add(max_queued)
+            .filter(|&total| max_concurrent > 0 && total <= Semaphore::MAX_PERMITS)
+            .ok_or_else(|| {
+                WxPayError::InvalidParameter("签名并发数必须大于零且总容量不能溢出".into())
+            })?;
+        self.workers = Arc::new(Semaphore::new(max_concurrent));
+        self.admission = Arc::new(Semaphore::new(total));
+        Ok(self)
     }
 
     /// 构建签名消息
@@ -143,43 +158,73 @@ impl Sha256RsaSigner {
         timestamp: i64,
         signature: &str,
     ) -> String {
-        // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时 String 分配。
-        use std::fmt::Write;
-        const PREFIX: &str = r#"WECHATPAY2-SHA256-RSA2048 mchid=""#;
-        let mut s = String::with_capacity(
-            PREFIX.len()
-                + self.merchant_id.len()
-                + nonce.len()
-                + self.cert_serial_number.len()
-                + signature.len()
-                + /*固定分隔与引号*/ 64
-                + /*timestamp*/ 20,
-        );
-        let _ = write!(
-            s,
-            r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
-            self.merchant_id, nonce, timestamp, self.cert_serial_number, signature
-        );
-        s
+        build_authorization_header(
+            &self.merchant_id,
+            &self.cert_serial_number,
+            nonce,
+            timestamp,
+            signature,
+        )
     }
+}
+
+/// 构建业务请求和证书下载共用的完整 Authorization Header。
+///
+/// 参数顺序为商户号、商户证书序列号、随机串、时间戳和 Base64 签名。
+pub fn build_authorization_header(
+    merchant_id: &str,
+    cert_serial_number: &str,
+    nonce: &str,
+    timestamp: i64,
+    signature: &str,
+) -> String {
+    use std::fmt::Write;
+    let mut header = String::with_capacity(
+        merchant_id.len() + cert_serial_number.len() + nonce.len() + signature.len() + 128,
+    );
+    let _ = write!(
+        header,
+        r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
+        merchant_id, nonce, timestamp, cert_serial_number, signature,
+    );
+    header
 }
 
 #[async_trait]
 impl Signer for Sha256RsaSigner {
     async fn sign(&self, message: &str) -> WxPayResult<String> {
-        // 计算 SHA256 哈希
-        let mut hasher = Sha256::new();
-        hasher.update(message.as_bytes());
-        let hash = hasher.finalize();
-
-        // 使用 RSA PKCS1v15 签名
-        let signature = self
-            .private_key
-            .sign(Pkcs1v15Sign::new::<Sha256>(), &hash)
-            .map_err(|e| WxPayError::SignError(format!("RSA 签名失败: {}", e)))?;
-
-        // Base64 编码
-        Ok(base64::engine::general_purpose::STANDARD.encode(&signature))
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| WxPayError::SignError("RSA 异步签名需要 Tokio 运行时".into()))?;
+        let admission = self
+            .admission
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| WxPayError::SignError("RSA 签名队列已满，请稍后重试".into()))?;
+        let worker = self
+            .workers
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| WxPayError::SignError("RSA 签名器已关闭".into()))?;
+        let private_key = Arc::clone(&self.private_key);
+        let message = message.to_owned();
+        runtime
+            .spawn_blocking(move || {
+                // 两个许可都交给计算任务，即使调用方取消，也不能提前释放并发配额。
+                let (_admission, _worker) = (admission, worker);
+                let mut signature = vec![0; private_key.public_modulus_len()];
+                private_key
+                    .sign(
+                        &RSA_PKCS1_SHA256,
+                        &SystemRandom::new(),
+                        message.as_bytes(),
+                        &mut signature,
+                    )
+                    .map_err(|_| WxPayError::SignError("RSA 签名失败".into()))?;
+                Ok(base64::engine::general_purpose::STANDARD.encode(signature))
+            })
+            .await
+            .map_err(|_| WxPayError::SignError("RSA 签名任务失败".into()))?
     }
 
     fn merchant_id(&self) -> &str {
@@ -205,12 +250,76 @@ mod tests {
     use super::*;
     use base64::Engine;
 
-    /// 测试用 PKCS#8 私钥（PEM），2048-bit，与 auth/verifier 测试用证书配套。
-    const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
+    use crate::crypto::test_fixtures::{
+        PKCS1_PRIVATE_KEY_PEM, PRIVATE_KEY_PEM, SHA256_SIGNATURE, SIGN_MESSAGE,
+    };
 
     fn test_signer() -> Sha256RsaSigner {
-        Sha256RsaSigner::new("1900000109", TEST_PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
+        Sha256RsaSigner::new("1900000109", PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
             .expect("测试签名器应创建成功")
+    }
+
+    #[tokio::test]
+    async fn matches_openssl_sha256_pkcs1_signature() {
+        for key in [PRIVATE_KEY_PEM, PKCS1_PRIVATE_KEY_PEM] {
+            let signer = Sha256RsaSigner::new("merchant", key.as_bytes(), "serial").unwrap();
+            assert_eq!(signer.sign(SIGN_MESSAGE).await.unwrap(), SHA256_SIGNATURE);
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_signing_capacity() {
+        assert!(test_signer().with_signing_capacity(0, 1).is_err());
+        assert!(test_signer().with_signing_capacity(1, usize::MAX).is_err());
+    }
+
+    #[tokio::test]
+    async fn bounded_queue_rejects_overload_and_releases_cancelled_waiter() {
+        let signer = Arc::new(test_signer().with_signing_capacity(1, 1).unwrap());
+        // Occupy one executing operation, then queue exactly one pending signature.
+        let worker = signer.workers.clone().acquire_owned().await.unwrap();
+        let admission = signer.admission.clone().acquire_owned().await.unwrap();
+        let queued_signer = Arc::clone(&signer);
+        let queued = tokio::spawn(async move { queued_signer.sign("queued").await });
+        tokio::task::yield_now().await;
+        assert_eq!(signer.admission.available_permits(), 0);
+        assert!(matches!(
+            signer.sign("overloaded").await,
+            Err(WxPayError::SignError(_))
+        ));
+        queued.abort();
+        assert!(queued.await.unwrap_err().is_cancelled());
+        drop((worker, admission));
+        assert_eq!(signer.admission.available_permits(), 2);
+        assert!(signer.sign("after cancellation").await.is_ok());
+    }
+
+    #[test]
+    fn cancellation_keeps_capacity_until_blocking_task_completes() {
+        use std::sync::mpsc;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let (release, blocked) = mpsc::channel();
+        let blocker = runtime.spawn_blocking(move || blocked.recv().unwrap());
+        let signer = Arc::new(test_signer().with_signing_capacity(1, 0).unwrap());
+        runtime.block_on(async {
+            let signing = Arc::clone(&signer);
+            let task = tokio::spawn(async move { signing.sign("cancelled").await });
+            tokio::task::yield_now().await;
+            // The RSA task is queued behind blocker, so this also proves the runtime yielded.
+            assert_eq!(signer.workers.available_permits(), 0);
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+            assert!(signer.sign("overloaded").await.is_err());
+            release.send(()).unwrap();
+            blocker.await.unwrap();
+        });
+        // Runtime drop joins blocking tasks; permits then become available again.
+        drop(runtime);
+        assert_eq!(signer.workers.available_permits(), 1);
+        assert_eq!(signer.admission.available_permits(), 1);
     }
 
     #[test]

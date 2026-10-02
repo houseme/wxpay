@@ -5,5 +5,5 @@
 pub mod downloader;
 pub mod manager;
 
-pub use downloader::CertDownloader;
+pub use downloader::{CertDownloader, CertRefreshHandle, CertRefresher, CertificateDownloader};
 pub use manager::CertManager;

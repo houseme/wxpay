@@ -8,3 +8,6 @@ pub mod rsa;
 
 pub use aes::Aes256GcmCipher;
 pub use rsa::{RsaOaepCipher, RsaOaepDecrypter};
+
+#[cfg(test)]
+pub(crate) mod test_fixtures;

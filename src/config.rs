@@ -12,22 +12,22 @@ pub enum Environment {
     /// 正式环境
     #[default]
     Production,
-    /// 沙箱环境
+    /// 不受支持的 APIv3 沙箱；构建配置时返回错误。
     Sandbox,
 }
 
 impl Environment {
-    /// 获取 API 基础 URL
+    /// 获取 API 基础 URL；不受支持的沙箱返回空字符串。
     pub fn base_url(&self) -> &str {
         match self {
             Self::Production => "https://api.mch.weixin.qq.com",
-            Self::Sandbox => "https://api.mch.weixin.qq.com",
+            Self::Sandbox => "",
         }
     }
 }
 
 /// 微信支付配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WxPayConfig {
     /// 应用 ID
     pub app_id: String,
@@ -50,6 +50,9 @@ pub struct WxPayConfig {
     /// 微信支付平台证书（可选，用于验签）
     pub platform_certificates: Vec<Vec<u8>>,
 
+    /// 微信支付公钥 ID 与 PEM 公钥，支持证书模式向公钥模式迁移。
+    pub platform_public_keys: Vec<(String, Vec<u8>)>,
+
     /// HTTP 超时时间（秒）
     pub timeout: u64,
 
@@ -58,7 +61,7 @@ pub struct WxPayConfig {
 }
 
 /// 微信支付配置构建器
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WxPayConfigBuilder {
     app_id: Option<String>,
     merchant_id: Option<String>,
@@ -68,6 +71,7 @@ pub struct WxPayConfigBuilder {
     cert_serial_number: Option<String>,
     environment: Environment,
     platform_certificates: Vec<Vec<u8>>,
+    platform_public_keys: Vec<(String, Vec<u8>)>,
     timeout: u64,
     max_retries: u32,
 }
@@ -84,6 +88,7 @@ impl WxPayConfigBuilder {
             cert_serial_number: None,
             environment: Environment::default(),
             platform_certificates: Vec::new(),
+            platform_public_keys: Vec::new(),
             timeout: 30,
             max_retries: 3,
         }
@@ -137,6 +142,12 @@ impl WxPayConfigBuilder {
         self
     }
 
+    /// 添加微信支付公钥及其对应的 `PUB_KEY_ID_` 标识。
+    pub fn platform_public_key(mut self, id: impl Into<String>, pem: Vec<u8>) -> Self {
+        self.platform_public_keys.push((id.into(), pem));
+        self
+    }
+
     /// 设置 HTTP 超时时间（秒）
     pub fn timeout(mut self, timeout: u64) -> Self {
         self.timeout = timeout;
@@ -179,7 +190,7 @@ impl WxPayConfigBuilder {
             .cert_serial_number
             .ok_or_else(|| WxPayError::missing_config("cert_serial_number"))?;
 
-        Ok(WxPayConfig {
+        let config = WxPayConfig {
             app_id,
             merchant_id,
             api_v3_key,
@@ -187,9 +198,12 @@ impl WxPayConfigBuilder {
             cert_serial_number,
             environment: self.environment,
             platform_certificates: self.platform_certificates,
+            platform_public_keys: self.platform_public_keys,
             timeout: self.timeout,
             max_retries: self.max_retries,
-        })
+        };
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -200,6 +214,36 @@ impl Default for WxPayConfigBuilder {
 }
 
 impl WxPayConfig {
+    /// 验证配置，客户端和请求入口也会检查以防公开字段被修改。
+    pub fn validate(&self) -> WxPayResult<()> {
+        if self.environment == Environment::Sandbox {
+            return Err(WxPayError::config(
+                "APIv3 不支持此沙箱配置；请使用本地测试 transport",
+            ));
+        }
+        if self.app_id.trim().is_empty() || self.merchant_id.trim().is_empty() {
+            return Err(WxPayError::config("app_id 和 merchant_id 不能为空"));
+        }
+        if self.private_key.is_empty() || self.cert_serial_number.trim().is_empty() {
+            return Err(WxPayError::config("商户私钥和证书序列号不能为空"));
+        }
+        for value in [&self.merchant_id, &self.cert_serial_number] {
+            if value
+                .bytes()
+                .any(|b| b.is_ascii_control() || matches!(b, b'"' | b'\\'))
+            {
+                return Err(WxPayError::config("签名凭证标识包含非法 header 字符"));
+            }
+        }
+        if self.api_v3_key.len() != 32 {
+            return Err(WxPayError::invalid_parameter("api_v3_key 必须是 32 字节"));
+        }
+        if self.timeout == 0 {
+            return Err(WxPayError::config("HTTP timeout 必须大于零"));
+        }
+        Ok(())
+    }
+
     /// 创建配置构建器
     pub fn builder() -> WxPayConfigBuilder {
         WxPayConfigBuilder::new()
@@ -217,7 +261,7 @@ impl WxPayConfig {
 }
 
 /// 微信支付通知配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NotifyConfig {
     /// API v3 密钥（用于解密通知数据）
     pub api_v3_key: String,
@@ -230,7 +274,7 @@ pub struct NotifyConfig {
 }
 
 /// 微信支付通知配置构建器
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NotifyConfigBuilder {
     api_v3_key: Option<String>,
     cert_serial_number: Option<String>,
@@ -300,9 +344,108 @@ impl NotifyConfig {
     }
 }
 
+impl std::fmt::Debug for WxPayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WxPayConfig")
+            .field("app_id", &self.app_id)
+            .field("merchant_id", &self.merchant_id)
+            .field("api_v3_key", &"[REDACTED]")
+            .field("private_key", &"[REDACTED]")
+            .field("cert_serial_number", &self.cert_serial_number)
+            .field("environment", &self.environment)
+            .field("platform_certificates", &self.platform_certificates.len())
+            .field("platform_public_keys", &self.platform_public_keys.len())
+            .field("timeout", &self.timeout)
+            .field("max_retries", &self.max_retries)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for WxPayConfigBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WxPayConfigBuilder")
+            .field("app_id", &self.app_id)
+            .field("merchant_id", &self.merchant_id)
+            .field("api_v3_key", &"[REDACTED]")
+            .field("private_key", &"[REDACTED]")
+            .field("environment", &self.environment)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for NotifyConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NotifyConfig")
+            .field("api_v3_key", &"[REDACTED]")
+            .field("cert_serial_number", &self.cert_serial_number)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for NotifyConfigBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NotifyConfigBuilder")
+            .field("api_v3_key", &"[REDACTED]")
+            .field("cert_serial_number", &self.cert_serial_number)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn valid_builder() -> WxPayConfigBuilder {
+        WxPayConfig::builder()
+            .app_id("app")
+            .merchant_id("1900000109")
+            .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
+            .private_key(b"private-key-material".to_vec())
+            .cert_serial_number("ABC123")
+    }
+
+    #[test]
+    fn rejects_sandbox_and_mutated_config() {
+        assert!(
+            valid_builder()
+                .environment(Environment::Sandbox)
+                .build()
+                .is_err()
+        );
+        let mut config = valid_builder().build().unwrap();
+        config.environment = Environment::Sandbox;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_empty_fields_and_unsafe_header_identifiers() {
+        assert!(valid_builder().app_id(" ").build().is_err());
+        assert!(valid_builder().timeout(0).build().is_err());
+        assert!(
+            valid_builder()
+                .merchant_id("merchant\nforged")
+                .build()
+                .is_err()
+        );
+        assert!(
+            valid_builder()
+                .cert_serial_number("cert\"forged")
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn config_debug_redacts_secret_material() {
+        let builder = valid_builder();
+        let builder_debug = format!("{builder:?}");
+        let config_debug = format!("{:?}", builder.build().unwrap());
+        for value in [builder_debug, config_debug] {
+            assert!(!value.contains("abcdefghijklmnopqrstuvwxyz123456"));
+            assert!(!value.contains("private-key-material"));
+            assert!(!value.contains("112, 114, 105, 118"));
+        }
+    }
 
     #[test]
     fn test_config_builder_success() {
@@ -361,10 +504,7 @@ mod tests {
             Environment::Production.base_url(),
             "https://api.mch.weixin.qq.com"
         );
-        assert_eq!(
-            Environment::Sandbox.base_url(),
-            "https://api.mch.weixin.qq.com"
-        );
+        assert!(Environment::Sandbox.base_url().is_empty());
     }
 
     #[test]

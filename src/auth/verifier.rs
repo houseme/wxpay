@@ -1,45 +1,20 @@
-//! 验签器模块
-//!
-//! 提供响应签名验证功能。
+//! Response signature verification backed by a shared platform trust store.
 
+use crate::cert::CertManager;
+use crate::cert::manager::VerificationKey;
+use crate::error::{WxPayError, WxPayResult};
 use async_trait::async_trait;
 use base64::Engine;
-use der::Encode;
-use rsa::pkcs8::DecodePublicKey;
-use rsa::{Pkcs1v15Sign, RsaPublicKey};
-use sha2::{Digest, Sha256};
-use x509_cert::Certificate;
+use std::sync::Arc;
 
-use crate::error::{WxPayError, WxPayResult};
-
-/// 验签器 trait
-///
-/// 定义了验证响应签名的接口。
+/// Signature verification. Protocol entry points should always choose a key
+/// with `verify_with_serial` using the original `Wechatpay-Serial` header.
 #[async_trait]
 pub trait Verifier: Send + Sync {
-    /// 验证签名
-    ///
-    /// # 参数
-    ///
-    /// * `message` - 原始消息
-    /// * `signature` - Base64 编码的签名
-    ///
-    /// # 返回
-    ///
-    /// 验证成功返回 Ok(true)，失败返回错误
+    /// Verify with an active configured key. Prefer serial-scoped verification.
     async fn verify(&self, message: &str, signature: &str) -> WxPayResult<bool>;
 
-    /// 验证签名（使用指定证书序列号）
-    ///
-    /// # 参数
-    ///
-    /// * `message` - 原始消息
-    /// * `signature` - Base64 编码的签名
-    /// * `serial_number` - 证书序列号
-    ///
-    /// # 返回
-    ///
-    /// 验证成功返回 Ok(true)，失败返回错误
+    /// Verify with the certificate serial or exact platform public-key ID.
     async fn verify_with_serial(
         &self,
         message: &str,
@@ -48,128 +23,70 @@ pub trait Verifier: Send + Sync {
     ) -> WxPayResult<bool>;
 }
 
-/// SHA256-RSA 验签器
-///
-/// 使用 SHA256WithRSA 算法验证响应签名。
-///
-/// # 示例
-///
-/// ```rust,no_run
-/// use wxpay_rs::auth::{Verifier, Sha256RsaVerifier};
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let cert_pem = std::fs::read_to_string("path/to/platform_cert.pem")?;
-///     let verifier = Sha256RsaVerifier::new(vec![cert_pem.as_bytes().to_vec()])?;
-///
-///     let result = verifier.verify("test message", "dGVzdF9zaWduYXR1cmU=").await?;
-///     let _ = result;
-///     Ok(())
-/// }
-/// ```
+/// SHA256-RSA verifier. Parsed keys are shared with certificate refreshes; keys
+/// are selected by serial/ID and certificate validity is checked on every use.
+#[derive(Debug)]
 pub struct Sha256RsaVerifier {
-    /// 证书列表（序列号 -> 公钥）
-    certificates: Vec<(String, RsaPublicKey)>,
+    manager: Arc<CertManager>,
 }
 
 impl Sha256RsaVerifier {
-    /// 创建新的 SHA256-RSA 验签器
-    ///
-    /// # 参数
-    ///
-    /// * `certificates` - 证书列表（PEM 格式）
-    ///
-    /// # 返回
-    ///
-    /// 返回验签器实例
+    /// Create a verifier from trusted PEM or DER X.509 certificates.
     pub fn new(certificates: Vec<Vec<u8>>) -> WxPayResult<Self> {
-        let mut parsed_certs = Vec::new();
-
-        for cert_der in certificates {
-            let cert = Self::parse_certificate(&cert_der)?;
-            let serial_number = Self::extract_serial_number(&cert)?;
-            let public_key = Self::extract_public_key(&cert)?;
-            parsed_certs.push((serial_number, public_key));
-        }
-
-        Ok(Self {
-            certificates: parsed_certs,
-        })
+        Self::new_with_public_keys(certificates, vec![])
     }
 
-    /// 解析证书
-    fn parse_certificate(der: &[u8]) -> WxPayResult<Certificate> {
-        use der::Decode;
-        Certificate::from_der(der)
-            .map_err(|e| WxPayError::CertificateParseError(format!("证书解析失败：{}", e)))
+    /// Create a verifier with trusted certificates and/or platform public keys.
+    pub fn new_with_public_keys(
+        certificates: Vec<Vec<u8>>,
+        public_keys: Vec<(String, Vec<u8>)>,
+    ) -> WxPayResult<Self> {
+        Ok(Self::from_manager(Arc::new(CertManager::from_material(
+            certificates,
+            public_keys,
+        )?)))
     }
 
-    /// 提取证书序列号
-    fn extract_serial_number(cert: &Certificate) -> WxPayResult<String> {
-        // 使用证书的序列号
-        let serial = &cert.tbs_certificate().serial_number();
-        let bytes = serial.as_bytes();
-        Ok(hex::encode(bytes))
+    /// Use a live shared manager so authenticated refreshes take effect immediately.
+    pub fn from_manager(manager: Arc<CertManager>) -> Self {
+        Self { manager }
     }
 
-    /// 提取公钥
-    fn extract_public_key(cert: &Certificate) -> WxPayResult<RsaPublicKey> {
-        // 从证书中提取公钥
-        let spki = cert.tbs_certificate().subject_public_key_info();
-        let spki_der = spki
-            .to_der()
-            .map_err(|e| WxPayError::CertificateParseError(format!("提取证书 SPKI 失败：{}", e)))?;
-
-        let public_key = RsaPublicKey::from_public_key_der(&spki_der)
-            .map_err(|e| WxPayError::CertificateParseError(format!("提取公钥失败：{}", e)))?;
-        Ok(public_key)
-    }
-
-    /// 构建验签消息
-    ///
-    /// 微信支付 API v3 验签格式：
-    /// TIMESTAMP\nNONCE_STR\nBODY\n
+    /// Build the APIv3 signature message: timestamp, nonce, original body, each
+    /// followed by a newline. The body must not be parsed and reserialized.
     pub fn build_verify_message(timestamp: i64, nonce: &str, body: &str) -> String {
-        // 性能优化：预分配容量并就地格式化时间戳，避免 `format!` 的临时分配。
         use std::fmt::Write;
-        let mut s = String::with_capacity(nonce.len() + body.len() + /*timestamp*/ 20 + /*换行*/ 3);
-        let _ = write!(s, "{}\n{}\n{}\n", timestamp, nonce, body);
-        s
+        let mut message = String::with_capacity(nonce.len() + body.len() + 23);
+        let _ = write!(message, "{timestamp}\n{nonce}\n{body}\n");
+        message
     }
 
-    /// 使用公钥验证签名
-    fn verify_signature(
-        public_key: &RsaPublicKey,
-        message: &str,
-        signature: &str,
-    ) -> WxPayResult<bool> {
-        // 计算 SHA256 哈希
-        let mut hasher = Sha256::new();
-        hasher.update(message.as_bytes());
-        let hash = hasher.finalize();
-
-        // Base64 解码签名
-        let signature_bytes = base64::engine::general_purpose::STANDARD
+    fn decode_signature(signature: &str) -> WxPayResult<Vec<u8>> {
+        base64::engine::general_purpose::STANDARD
             .decode(signature)
-            .map_err(|e| WxPayError::InvalidSignatureFormat(format!("Base64 解码失败：{}", e)))?;
+            .map_err(|e| {
+                WxPayError::InvalidSignatureFormat(format!("Invalid Base64 signature: {e}"))
+            })
+    }
 
-        // 验证签名
-        match public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &hash, &signature_bytes) {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+    fn verify_signature(key: &VerificationKey, message: &str, signature: &[u8]) -> bool {
+        key.key.verify_sig(message.as_bytes(), signature).is_ok()
     }
 }
 
 #[async_trait]
 impl Verifier for Sha256RsaVerifier {
     async fn verify(&self, message: &str, signature: &str) -> WxPayResult<bool> {
-        // 使用第一个证书验证
-        let (_, public_key) = self.certificates.first().ok_or_else(|| {
-            WxPayError::CertificateVerificationError("没有可用的证书".to_string())
-        })?;
-
-        Self::verify_signature(public_key, message, signature)
+        let keys = self.manager.verification_keys();
+        if keys.is_empty() {
+            return Err(WxPayError::CertificateVerificationError(
+                "No active verification keys".into(),
+            ));
+        }
+        let signature = Self::decode_signature(signature)?;
+        Ok(keys
+            .iter()
+            .any(|key| Self::verify_signature(key, message, &signature)))
     }
 
     async fn verify_with_serial(
@@ -178,44 +95,31 @@ impl Verifier for Sha256RsaVerifier {
         signature: &str,
         serial_number: &str,
     ) -> WxPayResult<bool> {
-        // 查找匹配的证书
-        let (_, public_key) = self
-            .certificates
-            .iter()
-            .find(|(serial, _)| serial == serial_number)
-            .ok_or_else(|| WxPayError::CertificateNotFound(serial_number.to_string()))?;
-
-        Self::verify_signature(public_key, message, signature)
-    }
-}
-
-impl std::fmt::Debug for Sha256RsaVerifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Sha256RsaVerifier")
-            .field("certificates_count", &self.certificates.len())
-            .finish()
+        let key = self.manager.verification_key(serial_number)?;
+        let signature = Self::decode_signature(signature)?;
+        Ok(Self::verify_signature(&key, message, &signature))
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::auth::{Sha256RsaSigner, Signer};
     use base64::Engine;
 
     /// 测试用自签名证书（DER，base64 编码）及其配套 PKCS#8 私钥（PEM）。
     /// 由 openssl 离线生成，CN=wxpay-rs-test，2048-bit，SHA256WithRSA。
-    const TEST_CERT_DER_B64: &str = "MIIDMTCCAhmgAwIBAgIUO0KjQ4nVBzRZyR/2689auBsGMPcwDQYJKoZIhvcNAQELBQAwJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDAgFw0yNjA2MTYwNDE3MDlaGA8yMDUzMTEwMTA0MTcwOVowJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANAXC1vTGcxi6aB67mWFz4W/9d9TaElw+da2OGbcxUGEQzvd2axnTKu87Fm0mGzh18qzwGVYq8MiefPTn7aWsN0CQ02+3RcT/QHnmfYduTjJkjHrM5+wmWtwSgsxN8Txg2GYZ5GYT4vc4nYv0gB4xlbkh/dPbQTrn7wGiETyfAthed1cNMxkPUwAePd/KAKfZNkcqotR/2XNih5orlZz0DySY7p0xx59eSyS8koln5L8bR/7VoVw3wxojsYWBSR2zOCcSVkpbF+K/+tdC3ZPzxlwrQCmzKmXl+W51b0jMqOlOsm0bHxHi1V9nS95DPfFNTuOhFTuZSMHKF9J6zpATe0CAwEAAaNTMFEwHQYDVR0OBBYEFGo+jzczvrST9JVBo875auuysJS3MB8GA1UdIwQYMBaAFGo+jzczvrST9JVBo875auuysJS3MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAChV2tnTzVIRbSHRrP0unCUYxf9mPldpVVB3Zbzb+S1oMllYwtUuNCgOuaIWz8LlA2A9yEoV5zvPJfrQFNJ3KYrMyAXJ7Q9UDFMSpP5aaqvtIq1GcLfw8EiyuGN3nQwHBPA2AN3JznDufWY5LI2TLDwiX/mv8U4ZzWHMOye7huI3AEIVTXv01NXWleI2TA/MxTMppaO8t5lzlaDXgPMnZqW5qsuHZzGk+aq07SO9KitKO4E5PoNYfE6ywWn13mOZrRklCtT9mauaE/kCHIAQPuyfWrZ2lvkjWIefQ/onZBxAKP5z6VcSb3Z/3G85MQm9kSnwUFjKw7yuauDv/wyq/AU=";
+    pub(crate) const TEST_CERT_DER_B64: &str = "MIIDMTCCAhmgAwIBAgIUO0KjQ4nVBzRZyR/2689auBsGMPcwDQYJKoZIhvcNAQELBQAwJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDAgFw0yNjA2MTYwNDE3MDlaGA8yMDUzMTEwMTA0MTcwOVowJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANAXC1vTGcxi6aB67mWFz4W/9d9TaElw+da2OGbcxUGEQzvd2axnTKu87Fm0mGzh18qzwGVYq8MiefPTn7aWsN0CQ02+3RcT/QHnmfYduTjJkjHrM5+wmWtwSgsxN8Txg2GYZ5GYT4vc4nYv0gB4xlbkh/dPbQTrn7wGiETyfAthed1cNMxkPUwAePd/KAKfZNkcqotR/2XNih5orlZz0DySY7p0xx59eSyS8koln5L8bR/7VoVw3wxojsYWBSR2zOCcSVkpbF+K/+tdC3ZPzxlwrQCmzKmXl+W51b0jMqOlOsm0bHxHi1V9nS95DPfFNTuOhFTuZSMHKF9J6zpATe0CAwEAAaNTMFEwHQYDVR0OBBYEFGo+jzczvrST9JVBo875auuysJS3MB8GA1UdIwQYMBaAFGo+jzczvrST9JVBo875auuysJS3MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAChV2tnTzVIRbSHRrP0unCUYxf9mPldpVVB3Zbzb+S1oMllYwtUuNCgOuaIWz8LlA2A9yEoV5zvPJfrQFNJ3KYrMyAXJ7Q9UDFMSpP5aaqvtIq1GcLfw8EiyuGN3nQwHBPA2AN3JznDufWY5LI2TLDwiX/mv8U4ZzWHMOye7huI3AEIVTXv01NXWleI2TA/MxTMppaO8t5lzlaDXgPMnZqW5qsuHZzGk+aq07SO9KitKO4E5PoNYfE6ywWn13mOZrRklCtT9mauaE/kCHIAQPuyfWrZ2lvkjWIefQ/onZBxAKP5z6VcSb3Z/3G85MQm9kSnwUFjKw7yuauDv/wyq/AU=";
 
-    const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
+    pub(crate) const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
 
-    fn test_cert_der() -> Vec<u8> {
+    pub(crate) fn test_cert_der() -> Vec<u8> {
         base64::engine::general_purpose::STANDARD
             .decode(TEST_CERT_DER_B64)
             .expect("测试证书 base64 解码应成功")
     }
 
-    fn test_signer() -> Sha256RsaSigner {
+    pub(crate) fn test_signer() -> Sha256RsaSigner {
         Sha256RsaSigner::new("1900000109", TEST_PRIVATE_KEY_PEM.as_bytes(), "CERT123456")
             .expect("测试签名器应创建成功")
     }
@@ -268,8 +172,7 @@ mod tests {
         let signer = test_signer();
 
         // 用与验签器相同的方式推导证书序列号（私有方法在本模块内可见）。
-        let cert = Sha256RsaVerifier::parse_certificate(&der).unwrap();
-        let serial = Sha256RsaVerifier::extract_serial_number(&cert).unwrap();
+        let (serial, _) = crate::cert::manager::CertEntry::parse(&der).unwrap();
 
         let message = "serial-scoped verify";
         let signature = signer.sign(message).await.unwrap();

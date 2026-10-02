@@ -464,20 +464,6 @@ impl From<base64::DecodeError> for WxPayError {
     }
 }
 
-/// 从 RSA 错误转换
-impl From<rsa::Error> for WxPayError {
-    fn from(err: rsa::Error) -> Self {
-        Self::SignError(format!("RSA 错误：{}", err))
-    }
-}
-
-/// 从 PKCS 错误转换
-impl From<pkcs8::Error> for WxPayError {
-    fn from(err: pkcs8::Error) -> Self {
-        Self::InvalidPrivateKey(format!("PKCS8 错误：{}", err))
-    }
-}
-
 /// 从 DER 错误转换
 impl From<der::Error> for WxPayError {
     fn from(err: der::Error) -> Self {

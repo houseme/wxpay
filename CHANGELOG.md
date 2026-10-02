@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 密钥、证书与加密
+
+- 使用 `aws-lc-rs` 替换 RSA 运算后端，移除命中 RUSTSEC-2023-0071 的 `rsa` 及相关传递依赖；
+  保持 SHA256-RSA 签名、PKCS#1/PKCS#8 私钥以及 PEM/DER 公钥兼容
+- AES-GCM 直接使用原始 32 字节 APIv3 密钥；RSA-OAEP 敏感字段对齐 SHA1/MGF1-SHA1。
+  旧版自加密数据分别使用 `from_legacy_sha256_key`、`decrypt_legacy_sha256` 显式迁移，不自动降级
+- RSA 签名移至有界 Tokio blocking 任务，限制执行与等待数量，取消调用不会提前释放在途计算配额；
+  新增并发签名基准和独立 OpenSSL/AES 测试向量。内置签名器需要 Tokio 运行时，超载返回 `SignError`
+- 平台证书和公钥使用共享的已解析密钥存储，支持 PEM/DER、证书序列号规范化、公钥 ID 精确匹配，
+  使用时验证有效期，拒绝同一身份替换为不同密钥
+- 证书下载强制 AES-GCM 认证及原始响应验签，整批通过后原子发布，支持认证后的首次下载与轮换重叠；
+  修复下载请求 Authorization 引号，并防止已弃用证书被重新加载激活
+- 证书刷新立即启动并返回可取消的 `CertRefreshHandle`；`start_auto_refresh` 现在返回 `Result`，
+  调用方必须持有句柄，释放句柄即停止刷新
+- 配置新增 `platform_public_key(id, pem)`；配置及凭据 Debug 隐藏密钥，拒绝不受支持的 Sandbox 和非法配置
+
 ### 安全与依赖
 
 - 移除 `webhook_actix.rs` 示例及 `actix-web` 开发依赖（功能由等价的 `webhook_axum.rs` 覆盖），
