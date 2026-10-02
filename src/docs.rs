@@ -1,4 +1,5 @@
-//! 文档辅助模块。
+//! README 使用示例的文档与编译入口。
 //!
-//! 当前用于满足 `docs` feature 下的模块导出，后续如需补充
-//! docs.rs 专用辅助内容，可继续在此扩展。
+//! 运行 `cargo test --doc --features docs --locked` 可检查 README 中的 Rust 示例。
+
+#![doc = include_str!("../README.md")]

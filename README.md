@@ -3,560 +3,213 @@
 [![Crates.io](https://img.shields.io/crates/v/wxpay-rs.svg)](https://crates.io/crates/wxpay-rs)
 [![Documentation](https://docs.rs/wxpay-rs/badge.svg)](https://docs.rs/wxpay-rs)
 [![License](https://img.shields.io/crates/l/wxpay-rs.svg)](LICENSE)
-[![Crates.io Total Downloads](https://img.shields.io/crates/d/wxpay-rs)](https://crates.io/crates/wxpay-rs)
 [![Build](https://github.com/houseme/wxpay/actions/workflows/Build.yml/badge.svg)](https://github.com/houseme/wxpay/actions/workflows/Build.yml)
 
+提供 JSAPI、小程序、Native、H5、APP 支付，以及订单查询、退款、分账和批量转账接口。基于 Tokio 和 reqwest，支持请求签名、响应验签、平台证书或公钥管理、RSA-OAEP 敏感字段加密和 AES-256-GCM 通知解密。
 
-**微信支付 API v3 的 Rust 实现 SDK**，提供类型安全、高性能的微信支付接口封装。
+本 README 对应当前源码；发布版本及兼容性变化见 [CHANGELOG](CHANGELOG.md)。`docs` feature 将本文的 Rust 示例纳入文档编译检查。
 
-## ✨ 特性
+## 安装
 
-- 🔐 **完整的签名与验签** - SHA256-RSA 签名算法，自动请求签名和应答验签
-- 🔒 **敏感信息加解密** - RSA-OAEP 加密/解密，AES-256-GCM 回调通知解密
-- 📜 **证书管理** - 自动定时下载和更新微信支付平台证书
-- 💳 **全支付方式支持** - JSAPI、Native、H5、APP 支付
-- 🔄 **回调通知处理** - 完整的支付回调验证和解密
-- 📊 **丰富的业务 API** - 支付、退款、分账、转账等完整业务支持
-- ⚡ **异步优先** - 基于 Tokio 的全异步实现，高性能并发
-- 🛡️ **类型安全** - Rust 强类型系统保障，编译期错误检查
-
-## 📦 安装
-
-在 `Cargo.toml` 中添加：
+本文包含尚未发布的下一主版本修复和 API。已发布的 `wxpay-rs 2.0.2` 不包含这些变更；在下一主版本发布前，请检出当前源码，通过本地路径依赖使用，并按实际检出位置调整路径。
 
 ```toml
 [dependencies]
-wxpay-rs = "2.0.2"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
+wxpay-rs = { path = "../wxpay" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
 
-## 🧭 迁移与 Webhook 示例入口
+默认启用 `tls-rustls`。`--no-default-features` 可用于自定义 HTTP transport 和本地测试；访问微信支付 HTTPS 接口需要启用 TLS。
 
-如果你是从 `wechatpay-apiv3/wechatpay-go` 迁移过来，或者准备直接接入支付/退款回调，可以先看这几份材料：
+## 初始化客户端
 
-- [examples/webhook_axum.rs](/Users/zhi/Documents/code/rust/houseme/wxpay/examples/webhook_axum.rs:1)：`Axum` 支付/退款回调可编译骨架
-- [.env.example](/Users/zhi/Documents/code/rust/houseme/wxpay/.env.example:1)：本地联调所需环境变量模板
+从商户平台取得商户私钥、商户证书序列号、32 字节 APIv3 密钥，以及受信任的微信支付平台公钥或证书。商户证书序列号用于请求签名；平台公钥 ID 或平台证书序列号用于响应和通知验签，两者不能互换。
 
-常见启动方式：
-
-```bash
-cp .env.example .env
-
-# Axum
-cargo run --example webhook_axum
-```
-
-### Go 风格兼容入口
-
-为了让 `wechatpay-go` 迁移更平滑，当前还额外提供了一层薄兼容入口：
-
-- `client.refunddomestic()` / `client.transferbatch()` / `client.profitsharing()`
-- `client.query().query_order_by_out_trade_no(...)`
-- `client.query().query_order_by_id(...)`
-- `client.refunddomestic().query_by_out_refund_no(...)`
-- `client.transferbatch().initiate_batch_transfer(...)`
-- `client.transferbatch().get_transfer_batch_by_out_batch_no(...)`
-- `client.profitsharing().create_order(...)`
-- `client.profitsharing().query_order(...)`
-- `client.profitsharing().finish_order(...)`
-
-如果你希望在第一轮迁移中尽量少改调用名，可以优先使用这层兼容入口，后续再逐步回收成 `wxpay-rs` 原生风格 API。
-
-说明：
-
-- 仓库内不再跟踪迁移草稿型文档，发布版以 `README`、crate API 和 `examples/` 为准。
-- 如果你需要本地迁移笔记，建议放在已忽略的 `local-docs/` 目录中自行维护。
-
-## 🚀 快速开始
-
-### 初始化客户端
-
-```rust
-use wxpay_rs::{
-    client::WxPayClient,
-    config::WxPayConfig,
-    error::WxPayResult,
-};
-use std::path::PathBuf;
-
-#[tokio::main]
-async fn main() -> WxPayResult<()> {
-    // 配置微信支付参数
-    let config = WxPayConfig::new(
-        "wx888888888",                              // AppID
-        "1900000109",                               // 商户号
-        "22222222",                                 // 商户 API 密钥
-        PathBuf::from("/path/to/apiclient_cert.pem"),  // 商户证书
-        PathBuf::from("/path/to/apiclient_key.pem"),   // 商户私钥
-    )
-    .api_v3_key("your_api_v3_key")                 // APIv3 密钥
-    .timeout(6000)                                  // 超时时间（毫秒）
-    .build();
-
-    // 创建客户端
-    let client = WxPayClient::new(config).await?;
-
-    println!("微信支付客户端初始化成功！");
-    Ok(())
-}
-```
-
-### JSAPI 支付示例
-
-```rust
-use wxpay_rs::services::payments::jsapi::*;
-use wxpay_rs::client::WxPayClient;
-
-async fn create_jsapi_order(client: &WxPayClient) -> WxPayResult<()> {
-    // 创建预支付请求
-    let request = PrepayRequest {
-        appid: "wx888888888".to_string(),
-        mchid: "1900000109".to_string(),
-        description: "测试商品".to_string(),
-        out_trade_no: "20240101000001".to_string(),
-        notify_url: "https://www.example.com/wxpay/notify".to_string(),
-        amount: Some(Amount {
-            total: 100,
-            currency: Some("CNY".to_string()),
-        }),
-        payer: Some(Payer {
-            openid: "oUpF8uMuAJO_M2pxb1Q9zNjWeS6o".to_string(),
-        }),
-        ..Default::default()
-    };
-
-    // 调用预支付接口
-    let result = client.jsapi().prepay(request).await?;
-    println!("预支付结果：{:?}", result);
-
-    // 生成前端支付参数
-    let pay_params = client.jsapi().build_pay_params(&result.prepay_id)?;
-    println!("前端支付参数：{:?}", pay_params);
-
-    Ok(())
-}
-```
-
-### Native 支付示例
-
-```rust
-use wxpay_rs::services::payments::native::*;
-
-async fn create_native_order(client: &WxPayClient) -> WxPayResult<()> {
-    let request = PrepayRequest {
-        appid: "wx888888888".to_string(),
-        mchid: "1900000109".to_string(),
-        description: "测试商品".to_string(),
-        out_trade_no: "20240101000002".to_string(),
-        notify_url: "https://www.example.com/wxpay/notify".to_string(),
-        amount: Some(Amount {
-            total: 100,
-            currency: Some("CNY".to_string()),
-        }),
-        ..Default::default()
-    };
-
-    let result = client.native().prepay(request).await?;
-    println!("二维码链接：{}", result.code_url);
-
-    Ok(())
-}
-```
-
-### 查询订单
-
-```rust
-use wxpay_rs::services::payments::query::*;
-
-async fn query_order(client: &WxPayClient) -> WxPayResult<()> {
-    // 通过商户订单号查询
-    let result = client.query().by_out_trade_no("20240101000001").await?;
-    println!("订单状态：{:?}", result.trade_state);
-
-    // 通过微信支付订单号查询
-    let result = client.query().by_transaction_id("4200001234202401010000001").await?;
-    println!("订单详情：{:?}", result);
-
-    Ok(())
-}
-```
-
-### 申请退款
-
-```rust
-use wxpay_rs::services::refund::*;
-
-async fn create_refund(client: &WxPayClient) -> WxPayResult<()> {
-    let request = RefundRequest {
-        out_trade_no: "20240101000001".to_string(),
-        out_refund_no: "R20240101000001".to_string(),
-        reason: Some("商品质量问题".to_string()),
-        amount: RefundAmount {
-            refund: 100,
-            total: 100,
-            currency: "CNY".to_string(),
-        },
-        ..Default::default()
-    };
-
-    let result = client.refund().create(request).await?;
-    println!("退款单号：{}", result.refund_id);
-
-    Ok(())
-}
-```
-
-### 处理回调通知
-
-```rust
-use wxpay_rs::notify::{NotifyHandler, NotifyPayload};
-use wxpay_rs::services::payments::Transaction;
-
-async fn handle_payment_notify(
-    handler: &NotifyHandler,
-    body: &str,
-    headers: &[(String, String)],
-) -> WxPayResult<()> {
-    // 验证签名并解密通知
-    let transaction: Transaction = handler.parse_notify_request(body, headers).await?;
-
-    // 处理支付结果
-    match transaction.trade_state {
-        TradeState::Success => {
-            println!("支付成功！订单号：{}", transaction.out_trade_no);
-            // 业务处理...
-        }
-        TradeState::Closed => {
-            println!("订单已关闭：{}", transaction.out_trade_no);
-        }
-        _ => {
-            println!("其他状态：{:?}", transaction.trade_state);
-        }
-    }
-
-    Ok(())
-}
-```
-
-## 📁 项目结构
-
-```
-wxpay-rs/
-├── Cargo.toml                    # 项目配置
-├── src/
-│   ├── lib.rs                    # 库入口
-│   ├── client.rs                 # HTTP 客户端实现
-│   ├── config.rs                 # 配置管理
-│   ├── error.rs                  # 错误类型定义
-│   ├── auth/                     # 认证模块
-│   │   ├── mod.rs
-│   │   ├── signer.rs             # 签名器
-│   │   ├── verifier.rs           # 验签器
-│   │   └── credentials.rs        # 凭证管理
-│   ├── cipher/                   # 加解密模块
-│   │   ├── mod.rs
-│   │   ├── rsa.rs                # RSA-OAEP 加解密
-│   │   └── aes.rs                # AES-256-GCM 加解密
-│   ├── cert/                     # 证书管理
-│   │   ├── mod.rs
-│   │   ├── downloader.rs         # 证书下载器
-│   │   └── visitor.rs            # 证书访问器
-│   ├── notify/                   # 回调通知处理
-│   │   ├── mod.rs
-│   │   └── handler.rs            # 通知处理器
-│   ├── utils/                    # 工具函数
-│   │   ├── mod.rs
-│   │   ├── nonce.rs              # 随机数生成
-│   │   ├── signature.rs          # 签名工具
-│   │   └── xml.rs                # XML 处理（v2 兼容）
-│   └── services/                 # 业务服务模块
-│       ├── mod.rs
-│       ├── certificates.rs       # 平台证书服务
-│       ├── payments/             # 支付服务
-│       │   ├── mod.rs
-│       │   ├── jsapi.rs          # JSAPI 支付
-│       │   ├── native.rs         # Native 支付
-│       │   ├── h5.rs             # H5 支付
-│       │   ├── app.rs            # APP 支付
-│       │   └── query.rs          # 订单查询
-│       ├── refund.rs             # 退款服务
-│       ├── profit_sharing.rs     # 分账服务
-│       ├── transfer.rs           # 转账服务
-│       └── fileuploader.rs       # 文件上传服务
-├── examples/                     # 示例代码
-│   ├── jsapi_payment.rs
-│   ├── native_payment.rs
-│   ├── refund.rs
-│   └── notify.rs
-└── tests/                        # 集成测试
-    ├── integration_test.rs
-    └── mock_server.rs
-```
-
-## 🔧 配置选项
-
-### 完整配置示例
-
-```rust
-use wxpay_rs::config::{WxPayConfig, SignType, AuthType};
-use std::path::PathBuf;
-
-let config = WxPayConfig::builder()
-    .app_id("wx888888888")
-    .mch_id("1900000109")
-    .api_v3_key("your_api_v3_key")
-    .merchant_cert_path(PathBuf::from("/path/to/apiclient_cert.pem"))
-    .merchant_key_path(PathBuf::from("/path/to/apiclient_key.pem"))
-    .sign_type(SignType::Sha256Rsa)           // 签名类型
-    .auth_type(AuthType::Certificate)          // 认证类型：证书或公钥
-    .timeout(6000)                             // 超时时间
-    .auto_download_certs(true)                 // 自动下载证书
-    .cert_download_interval(3600)              // 证书下载间隔（秒）
-    .base_url("https://api.mch.weixin.qq.com") // API 基础 URL
-    .sandbox(false)                            // 是否使用沙箱环境
-    .build()?;
-```
-
-### 使用公钥验签（新入驻商户）
-
-```rust
-let config = WxPayConfig::builder()
-    .app_id("wx888888888")
-    .mch_id("1900000109")
-    .api_v3_key("your_api_v3_key")
-    .merchant_cert_path(PathBuf::from("/path/to/apiclient_cert.pem"))
-    .merchant_key_path(PathBuf::from("/path/to/apiclient_key.pem"))
-    .auth_type(AuthType::PublicKey {
-        public_key_id: "PUB_KEY_ID_00000000000000".to_string(),
-        public_key_path: PathBuf::from("/path/to/public_key.pem"),
-    })
-    .build()?;
-```
-
-## 📚 支持的 API 列表
-
-### 支付服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `jsapi().prepay()` | JSAPI 预支付 | ✅ |
-| `native().prepay()` | Native 预支付 | ✅ |
-| `h5().prepay()` | H5 预支付 | ✅ |
-| `app().prepay()` | APP 预支付 | ✅ |
-| `query().by_transaction_id()` | 微信支付单号查询 | ✅ |
-| `query().by_out_trade_no()` | 商户订单号查询 | ✅ |
-| `query().by_filter()` | 复杂条件查询 | ✅ |
-| `query().close()` | 关闭订单 | ✅ |
-
-### 退款服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `refund().create()` | 申请退款 | ✅ |
-| `refund().query()` | 查询退款 | ✅ |
-
-### 分账服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `profit_sharing().create()` | 创建分账 | ✅ |
-| `profit_sharing().query()` | 查询分账 | ✅ |
-| `profit_sharing().add_receiver()` | 添加分账接收方 | ✅ |
-| `profit_sharing().delete_receiver()` | 删除分账接收方 | ✅ |
-| `profit_sharing().finish()` | 完成分账 | ✅ |
-
-### 转账服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `transfer().create()` | 发起转账 | ✅ |
-| `transfer().query()` | 查询转账 | ✅ |
-
-### 证书服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `certificates().get_certificates()` | 获取平台证书 | ✅ |
-
-### 文件服务
-
-| API | 说明 | 状态 |
-|-----|------|------|
-| `fileuploader().upload_image()` | 上传图片 | ✅ |
-| `fileuploader().upload_video()` | 上传视频 | ✅ |
-
-## 🔐 安全特性
-
-### 签名算法
-
-- **SHA256-RSA** - 默认签名算法，推荐使用
-- **HMAC-SHA256** - 备用签名算法
-
-### 敏感信息加密
-
-```rust
-use wxpay_rs::cipher::RsaCipher;
-
-// 加密敏感信息
-let encrypted = RsaCipher::encrypt_with_certificate(
-    "敏感信息",
-    &platform_certificate,
-)?;
-
-// 解密敏感信息
-let decrypted = RsaCipher::decrypt_with_private_key(
-    &encrypted_data,
-    &merchant_private_key,
-)?;
-```
-
-### 回调通知验证
-
-```rust
-use wxpay_rs::notify::NotifyHandler;
-
-// 验证通知签名
-let is_valid = handler.verify_signature(
-    &signature,
-    &timestamp,
-    &nonce,
-    &body,
-)?;
-
-// 解密通知数据
-let decrypted = handler.decrypt_notification(
-    &ciphertext,
-    &nonce,
-    &associated_data,
-)?;
-```
-
-## 🧪 测试
-
-### 运行测试
-
-```bash
-# 运行所有测试
-cargo test
-
-# 运行集成测试
-cargo test --test integration_test
-
-# 运行示例
-cargo run --example jsapi_payment
-```
-
-### 沙箱环境测试
-
-```rust
-let config = WxPayConfig::builder()
-    .sandbox(true)
-    // ... 其他配置
-    .build()?;
-```
-
-## 📖 示例代码
-
-### 完整的支付流程示例
-
-```rust
-use wxpay_rs::{
-    client::WxPayClient,
-    config::WxPayConfig,
-    services::payments::jsapi::*,
-    notify::NotifyHandler,
-};
-use std::path::PathBuf;
+```rust,no_run
+use wxpay_rs::{WxPayClient, WxPayConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. 初始化配置
-    let config = WxPayConfig::new(
-        "wx888888888",
-        "1900000109",
-        "22222222",
-        PathBuf::from("/path/to/cert.pem"),
-        PathBuf::from("/path/to/key.pem"),
-    )
-    .api_v3_key("your_api_v3_key")
-    .build()?;
+    let config = WxPayConfig::builder()
+        .app_id("wx88888888")
+        .merchant_id("1900000109")
+        .api_v3_key(std::env::var("WXPAY_API_V3_KEY")?)
+        .private_key_from_file("certs/apiclient_key.pem")
+        .cert_serial_number("YOUR_MERCHANT_CERT_SERIAL")
+        .platform_public_key(
+            "PUB_KEY_ID_YOUR_PLATFORM_KEY_ID",
+            std::fs::read("certs/wechatpay_public_key.pem")?,
+        )
+        .timeout(30) // 秒
+        .build()?;
 
-    // 2. 创建客户端
     let client = WxPayClient::new(config).await?;
-
-    // 3. 创建预支付订单
-    let request = PrepayRequest {
-        appid: "wx888888888".to_string(),
-        mchid: "1900000109".to_string(),
-        description: "测试商品".to_string(),
-        out_trade_no: format!("ORDER_{}", chrono::Utc::now().timestamp()),
-        notify_url: "https://www.example.com/notify".to_string(),
-        amount: Some(Amount {
-            total: 100,
-            currency: Some("CNY".to_string()),
-        }),
-        payer: Some(Payer {
-            openid: "oUpF8uMuAJO_M2pxb1Q9zNjWeS6o".to_string(),
-        }),
-        ..Default::default()
-    };
-
-    let prepay_result = client.jsapi().prepay(request).await?;
-
-    // 4. 生成前端调起支付的参数
-    let pay_params = client.jsapi().build_pay_params(&prepay_result.prepay_id)?;
-    println!("前端支付参数：{:#?}", pay_params);
-
-    // 5. 处理支付回调（在回调接口中）
-    // let handler = client.notify_handler();
-    // let transaction = handler.parse_notify_request(body, headers).await?;
-
+    let _ = client;
     Ok(())
 }
 ```
 
-## 🤝 贡献
+证书模式将上例的 `.platform_public_key(id, pem)` 替换为 `.platform_certificate(std::fs::read("certs/wechatpay_platform.pem")?)`。公钥模式和证书模式可以同时配置，便于迁移。证书必须在有效期内；公钥 ID 必须与微信支付响应中的 `Wechatpay-Serial` 对应。
 
-欢迎提交 Issue 和 Pull Request！
+客户端按响应原文验签。缺少签名头、未知的平台密钥、过期证书或不正确的签名都会导致业务请求失败；不能把未验签的数据作为可信业务结果。初始化客户端不会自动下载证书，也不会自动启动后台刷新。
 
-### 开发环境设置
+`CertDownloader` 支持经过认证的首次证书下载：先以 APIv3 密钥通过 AES-256-GCM 认证并解密候选证书，再用对应候选证书验证完整响应签名；全部检查通过后才写入共享信任状态。已有可信平台密钥时优先使用它验签，已知密钥的验签失败不会触发候选替换。未加密的证书内容或没有有效签名的响应不能建立信任。
 
-```bash
-# 克隆仓库
-git clone https://github.com/houseme/wxpay.git
-cd wxpay
+APIv3 不提供本 SDK 可用的沙箱；`Environment::Sandbox` 会返回配置错误。本地自动化测试应注入 mock HTTP transport，真实请求会操作正式商户数据。
 
-# 运行测试
-cargo test
+## JSAPI / 小程序支付
 
-# 运行示例
-cargo run --example jsapi_payment
+```rust,no_run
+use wxpay_rs::{WxPayClient, WxPayResult};
+use wxpay_rs::services::payments::jsapi::{Amount, JsapiPayParams, JsapiRequest, Payer};
+
+async fn create_jsapi_order(client: &WxPayClient, openid: String) -> WxPayResult<JsapiPayParams> {
+    let request = JsapiRequest {
+        appid: client.config().app_id.clone(),
+        mchid: client.config().merchant_id.clone(),
+        description: "测试商品".into(),
+        out_trade_no: "ORDER_202610020001".into(),
+        amount: Some(Amount { total: 100, currency: Some("CNY".into()) }),
+        payer: Some(Payer { openid }),
+        notify_url: Some("https://example.com/webhooks/wechatpay/payment".into()),
+    };
+
+    let response = client.jsapi().create_order(&request).await?;
+    client.jsapi().build_pay_params(&response.prepay_id).await
+}
 ```
 
-## 📄 许可证
+金额单位为分。订单号必须由业务系统生成并持久化。`JsapiPayParams` 的 JSON 字段对应 WeixinJSBridge / 小程序 `requestPayment`；使用 JSSDK `chooseWXpay` 时，将 `timeStamp` 映射为 `timestamp`。前端返回成功后仍需以验签通知或主动查单确认支付结果。
 
-本项目采用 [Apache-2.0](LICENSE) 许可证。
+## Native 支付
 
-## 🔗 相关链接
+```rust,no_run
+use wxpay_rs::{WxPayClient, WxPayResult};
+use wxpay_rs::services::payments::{jsapi::Amount, native::NativeRequest};
 
-- [微信支付官方文档](https://pay.weixin.qq.com)
-- [微信支付 API v3 文档](https://pay.weixin.qq.com/wiki/doc/apiv3/index.shtml)
-- [微信支付 Go SDK](https://github.com/wechatpay-apiv3/wechatpay-go)
-- [Rust 官方网站](https://www.rust-lang.org)
+async fn create_native_order(client: &WxPayClient) -> WxPayResult<String> {
+    let request = NativeRequest {
+        appid: client.config().app_id.clone(),
+        mchid: client.config().merchant_id.clone(),
+        description: "测试商品".into(),
+        out_trade_no: "ORDER_202610020002".into(),
+        amount: Some(Amount { total: 100, currency: Some("CNY".into()) }),
+        notify_url: Some("https://example.com/webhooks/wechatpay/payment".into()),
+    };
+    Ok(client.native().create_order(&request).await?.code_url)
+}
+```
 
-## ⚠️ 注意事项
+将返回的 `code_url` 转成二维码展示给用户。H5、APP 的请求类型分别为 `H5Request`、`AppRequest`，通过 `client.h5()`、`client.app()` 调用。
 
-1. **密钥安全**：请妥善保管商户私钥和 APIv3 密钥，不要泄露或提交到代码仓库
-2. **证书更新**：建议启用自动证书下载功能，确保证书及时更新
-3. **错误处理**：所有 API 调用都应进行适当的错误处理
-4. **日志记录**：建议开启日志记录，便于问题排查
-5. **超时设置**：根据业务需求合理设置超时时间
+## 查询订单与退款
 
-## 📞 支持
+```rust,no_run
+use wxpay_rs::{WxPayClient, WxPayResult};
+use wxpay_rs::services::refund::{RefundAmount, RefundRequest};
 
-如有问题，请通过以下方式联系：
+async fn query_and_refund(client: &WxPayClient, out_trade_no: &str) -> WxPayResult<()> {
+    let order = client.query().by_out_trade_no(out_trade_no).await?;
+    if order.trade_state != "SUCCESS" {
+        return Ok(());
+    }
+    // 未支付订单可能没有微信支付订单号，应处理 Option。
+    let _transaction_id = order.transaction_id.as_deref();
 
-- 提交 [GitHub Issue](https://github.com/houseme/wxpay/issues)
-- 邮件联系：housemecn@gmail.com
+    let request = RefundRequest {
+        transaction_id: None,
+        out_trade_no: Some(out_trade_no.into()),
+        out_refund_no: "REFUND_202610020001".into(),
+        reason: Some("用户申请退款".into()),
+        amount: RefundAmount { refund: 100, total: 100, currency: "CNY".into() },
+        notify_url: Some("https://example.com/webhooks/wechatpay/refund".into()),
+    };
+    let refund = client.refund().create_refund(&request).await?;
+    let _latest = client.refund().query_refund(&refund.out_refund_no).await?;
+    Ok(())
+}
+```
+
+退款时 `transaction_id` 与 `out_trade_no` 恰好提供一个。生产代码应从已持久化订单读取原金额、退款金额和幂等退款单号。请求超时并不证明业务操作失败，应使用同一业务单号查单确认。
+
+## 验签并解密通知
+
+在应用启动时创建 `client.notify_handler()?`，并在请求之间复用。将 HTTP 原始 body 字节和四个签名头传入 `verify_and_parse`，不要先解析 JSON 再重新序列化。
+
+```rust,no_run
+use wxpay_rs::notify::{NotifyHandler, NotifyHeaders, PaymentExpectation};
+use wxpay_rs::notify::handler::PaymentNotifyData;
+use wxpay_rs::WxPayResult;
+
+async fn verify_payment(
+    handler: &NotifyHandler,
+    headers: NotifyHeaders<'_>,
+    raw_body: &[u8],
+    expected: PaymentExpectation<'_>, // 必须来自本地订单，而不是通知字段
+) -> WxPayResult<(String, PaymentNotifyData)> {
+    let verified = handler.verify_and_parse(headers, raw_body).await?;
+    let payment = handler.handle_verified_payment_notify(&verified).await?;
+    payment.validate_order(expected)?;
+    // 将通知 ID、订单状态变更和业务任务写入同一个幂等事务后，才能应答成功。
+    Ok((verified.request().id.clone(), payment))
+}
+```
+
+`NotifyHeaders` 包含 `timestamp`、`nonce`、`serial`、`signature`，分别取自 `Wechatpay-Timestamp`、`Wechatpay-Nonce`、`Wechatpay-Serial`、`Wechatpay-Signature`。验签入口检查 300 秒时间窗口；窗口内的重复通知仍需数据库幂等处理。
+
+退款通知使用 `handle_verified_refund_notify` 和 `RefundExpectation`，支持成功、关闭及异常状态。请根据本地商户、订单、金额和退款单核对结果推进业务状态。
+
+[Axum Webhook 示例](examples/webhook_axum.rs) 展示原始请求体验签和 HTTP 应答流程。其持久化接收函数默认返回失败；完成订单核对和数据库事务后再启用成功应答。仅在业务持久化成功后返回 HTTP 204，验签、解密或业务处理失败时返回非 2xx。
+
+## 证书与公钥管理
+
+`client.cert_manager()`、响应验签器和通知处理器共享可信密钥状态。通过管理器更新证书或公钥后，已有服务和通知处理器即可使用更新后的密钥。
+
+证书下载和刷新入口为 `cert::CertDownloader` 与 `cert::downloader::CertRefresher`。`CertRefresher::new(downloader, interval_secs).start_auto_refresh()?` 返回 `CertRefreshHandle`，启动后立即执行首次刷新，之后按秒间隔运行；间隔必须大于零。应用需持有该句柄，通过 `cancel()` 或释放句柄停止任务。公钥模式的密钥轮换需按商户平台下发的新公钥 ID 更新配置或共享管理器；平台公钥不是通过证书接口自动下载的。
+
+## API 入口
+
+| 功能 | 入口 |
+| --- | --- |
+| JSAPI、Native、H5、APP 下单 | `client.jsapi()/native()/h5()/app().create_order(&request)` |
+| 前端调起参数 | `client.jsapi().build_pay_params()` / `client.app().generate_pay_params()`，均为异步方法 |
+| 订单查询和关闭 | `client.query().by_out_trade_no()` / `by_transaction_id()` / `close()` |
+| 退款申请和查询 | `client.refund().create_refund()` / `query_refund()` |
+| 分账及接收方管理 | `client.profit_sharing().create()` / `query()` / `add_receiver()` / `delete_receiver()` / `finish()` |
+| 批量转账及查询 | `client.transfer().create_transfer()` / `query_transfer_batch()` / `query_batch()` |
+| 下载平台证书响应 | `client.certificates().get_certificates()` |
+| 支付和退款通知 | `client.notify_handler()` |
+
+分账、转账请求与查询具有不同的模型，按方法签名传递参数。当前批量转账服务对应 `/v3/transfer/batches`，不是新版商家转账单接口；使用前确认商户开通的产品。SDK 不提供文件上传接口。
+
+保留 Go SDK 风格的薄兼容入口：`refunddomestic()`、`transferbatch()`、`profitsharing()`，以及 `query_order_by_out_trade_no()`、`query_order_by_id()` 等别名。完整签名请查看 [API 文档](https://docs.rs/wxpay-rs)。
+
+## 加密与升级注意事项
+
+- APIv3 请求和调起支付使用 SHA256-RSA。敏感字段使用微信支付要求的 RSA-OAEP-SHA1，RSA 后端为 `aws-lc-rs`。
+- `Aes256GcmCipher::new` 直接使用 32 字节 APIv3 密钥。旧版本额外哈希密钥的本地自加密数据需要通过显式旧格式迁移入口读取；通知和证书解密必须使用标准入口。迁移说明见 [CHANGELOG](CHANGELOG.md)。
+- 配置和凭据的 `Debug` 输出隐藏密钥。应用仍需避免记录通知全文、请求签名、个人信息或商户私钥。
+- 复用 `WxPayClient` 和通知处理器；客户端共享 HTTP 连接池及验签密钥。性能变化应通过同一环境的基准和并发延迟测量确认。
+
+## 运行示例与验证
+
+复制 [.env.example](.env.example) 并填写本地凭据。除商户配置外，至少提供一份受信任的平台证书，或一组平台公钥 ID 与 PEM 文件。示例缺少配置时会打印说明并跳过真实调用。
+
+```bash
+cp .env.example .env
+cargo run --locked --example payment_native
+cargo run --locked --example webhook_axum
+
+cargo fmt --all --check
+cargo check --all-targets --no-default-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+cargo test --doc --all-features --locked
+```
+
+其他示例见 [examples](examples)：`query_and_refund`、`transfer_and_profit_sharing`、`cert_download_demo`、`signing_demo` 和 `crypto_demo`。需要网络的示例会使用正式商户接口，请填写专用测试订单并核对每项业务操作。
+
+## 贡献与许可证
+
+欢迎通过 [GitHub Issues](https://github.com/houseme/wxpay/issues) 和 Pull Requests 反馈问题或提交改进。本项目采用 [Apache-2.0](LICENSE) 许可证。

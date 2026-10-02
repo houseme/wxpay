@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 文档与验证
+
+- 重写 README 为当前可编译 API，删除不存在的上传接口、配置类型和本机路径；
+  明确源码依赖、秒级 timeout、平台信任配置、认证 bootstrap、刷新句柄及真实业务接收责任
+- `docs` feature 将 README 示例纳入 doctest；CI 实际执行默认及无默认 feature 检查，
+  扩大到所有 targets，使用锁文件并将 Clippy 警告作为错误
+- 示例通过平台证书或公钥 ID/PEM 配置可信材料，缺少配置时跳过真实调用
+- 升级注意：RSA 公钥加密和验签要求受支持的 2048 至 8192 位密钥；
+  移除对旧后端 `rsa::Error`、`pkcs8::Error` 的 `From` 实现。
+  新增公开配置字段及前述响应类型变更需调用方适配，下一主版本发布前使用源码依赖验证
+
 ### 支付与资金接口
 
 - JSAPI/APP 调起参数使用正确的四行签名串及前端 JSON 字段，支持使用下单时的 AppID 生成参数
