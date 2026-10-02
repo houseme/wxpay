@@ -3,11 +3,12 @@ use std::time::Instant;
 
 use serde::de::DeserializeOwned;
 
-use crate::auth::Signer;
+use crate::auth::{Sha256RsaSigner, Sha256RsaVerifier, Signer, Verifier};
+use crate::cert::CertManager;
 use crate::config::WxPayConfig;
 use crate::error::{WxPayAlertLevel, WxPayError, WxPayErrorKind, WxPayResult};
 use crate::http::client::HttpResponse;
-use crate::http::{HttpClient, HttpMethod, RequestBuilder, ResponseHandler};
+use crate::http::{HttpClient, HttpMethod, ResponseHandler};
 
 /// User-Agent 常量（编译期拼入 crate 版本，避免每次请求重复格式化）。
 const USER_AGENT: &str = concat!("wxpay-rs/", env!("CARGO_PKG_VERSION"));
@@ -133,7 +134,7 @@ impl TransportEvent {
     }
 }
 
-/// 传输观测回调
+/// 传输观测回调。回调在请求任务内同步执行，请勿执行阻塞 I/O。
 pub trait TransportObserver: Send + Sync {
     /// 请求成功回调（可用于指标计数/延迟统计）
     fn on_success(&self, _event: &TransportEvent) {}
@@ -147,11 +148,19 @@ pub struct NoopTransportObserver;
 
 impl TransportObserver for NoopTransportObserver {}
 
+#[derive(Clone)]
 pub struct ServiceTransport {
     config: Arc<WxPayConfig>,
     http_client: Arc<dyn HttpClient>,
     signer: Arc<dyn Signer>,
     transport_observer: Option<Arc<dyn TransportObserver>>,
+    trust: Arc<Result<TransportTrust, String>>,
+}
+
+struct TransportTrust {
+    require_active_key: bool,
+    verifier: Arc<dyn Verifier>,
+    cert_manager: Arc<CertManager>,
 }
 
 impl std::fmt::Debug for ServiceTransport {
@@ -179,57 +188,102 @@ impl ServiceTransport {
         signer: Arc<dyn Signer>,
         transport_observer: Option<Arc<dyn TransportObserver>>,
     ) -> Self {
+        let trust = CertManager::from_material(
+            config.platform_certificates.clone(),
+            config.platform_public_keys.clone(),
+        )
+        .map(|manager| {
+            let cert_manager = Arc::new(manager);
+            TransportTrust {
+                require_active_key: true,
+                verifier: Arc::new(Sha256RsaVerifier::from_manager(cert_manager.clone())),
+                cert_manager,
+            }
+        })
+        .map_err(|error| error.to_string());
         Self {
             config,
             http_client,
             signer,
             transport_observer,
+            trust: Arc::new(trust),
         }
+    }
+
+    /// 使用共享验签器和证书管理器创建执行器。
+    pub(crate) fn new_with_verifier(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        verifier: Arc<dyn Verifier>,
+        cert_manager: Arc<CertManager>,
+        require_active_key: bool,
+        transport_observer: Option<Arc<dyn TransportObserver>>,
+    ) -> Self {
+        Self {
+            config,
+            http_client,
+            signer,
+            transport_observer,
+            trust: Arc::new(Ok(TransportTrust {
+                require_active_key,
+                verifier,
+                cert_manager,
+            })),
+        }
+    }
+
+    fn trust(&self) -> WxPayResult<&TransportTrust> {
+        self.trust
+            .as_ref()
+            .as_ref()
+            .map_err(|message| WxPayError::CertificateParseError(message.clone()))
+    }
+
+    /// 同一次请求的所有敏感字段使用同一个平台密钥快照。
+    /// 所有字段加密成功后才替换原值，返回值用于 Wechatpay-Serial 请求头。
+    pub(crate) async fn encrypt_sensitive_fields(
+        &self,
+        fields: &mut [&mut String],
+    ) -> WxPayResult<Option<String>> {
+        if fields.is_empty() {
+            return Ok(None);
+        }
+        let (serial, cipher) = self.trust()?.cert_manager.encryption_key().await?;
+        let encrypted = fields
+            .iter()
+            .map(|field| cipher.encrypt(field))
+            .collect::<WxPayResult<Vec<_>>>()?;
+        for (field, ciphertext) in fields.iter_mut().zip(encrypted) {
+            **field = ciphertext;
+        }
+        Ok(Some(serial))
     }
 
     fn build_headers(
         &self,
-        request: &crate::http::request::WxPayRequest,
+        nonce: &str,
+        timestamp: i64,
         method: HttpMethod,
         signature: &str,
+        mut headers: Vec<(String, String)>,
     ) -> Vec<(String, String)> {
-        let mut headers = request.headers_vec();
-
-        // 性能优化：预分配容量并就地写入，避免 `format!` 为时间戳等产生的临时分配。
-        use std::fmt::Write;
-        let authorization = {
-            let mut s = String::with_capacity(
-                /*前缀与分隔符*/
-                72
-                    + self.config.merchant_id.len()
-                    + request.nonce.len()
-                    + self.config.cert_serial_number.len()
-                    + signature.len()
-                    + /*timestamp*/ 20,
-            );
-            let _ = write!(
-                s,
-                r#"WECHATPAY2-SHA256-RSA2048 mchid="{}",nonce_str="{}",timestamp="{}",serial_no="{}",signature="{}""#,
-                self.config.merchant_id,
-                request.nonce,
-                request.timestamp,
-                self.config.cert_serial_number,
-                signature
-            );
-            s
-        };
-
+        let authorization = crate::auth::signer::build_authorization_header(
+            &self.config.merchant_id,
+            &self.config.cert_serial_number,
+            nonce,
+            timestamp,
+            signature,
+        );
         headers.push(("Authorization".to_string(), authorization));
         headers.push(("Accept".to_string(), "application/json".to_string()));
         headers.push(("User-Agent".to_string(), USER_AGENT.to_string()));
-
         if matches!(
             method,
             HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch
         ) {
             headers.push(("Content-Type".to_string(), "application/json".to_string()));
         }
-
         headers
     }
 
@@ -238,166 +292,218 @@ impl ServiceTransport {
         method: HttpMethod,
         path: &str,
         body: Option<&str>,
-        operation: &str,
+        mut extra_headers: Vec<(String, String)>,
     ) -> WxPayResult<HttpResponse> {
-        let mut request =
-            RequestBuilder::new(method, path).timestamp(crate::utils::timestamp::get_timestamp());
-        if let Some(body) = body {
-            request = request.body(body);
+        self.config.validate()?;
+        let trust = self.trust()?;
+        if trust.require_active_key && trust.cert_manager.verification_keys().is_empty() {
+            return Err(WxPayError::CertificateVerificationError(
+                "发送业务请求前必须配置有效的平台证书或公钥".to_string(),
+            ));
         }
-
-        let request = request.nonce(crate::utils::nonce::generate_nonce()).build();
-        let signature = self.signer.sign(&request.sign_message()).await?;
-        let headers = self.build_headers(&request, method, &signature);
-        let url = request.full_url(self.config.base_url());
-
-        let started_at = Instant::now();
-        let response_result: WxPayResult<HttpResponse> = match method {
+        // 公钥灰度期间，普通请求也必须声明接受的公钥 ID。
+        // 敏感字段已经选定密钥时保留其 serial，不能替换或追加第二个值。
+        if !extra_headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("Wechatpay-Serial"))
+            && let Some(id) = trust.cert_manager.preferred_public_key_id()
+        {
+            extra_headers.push(("Wechatpay-Serial".to_string(), id));
+        }
+        let timestamp = crate::utils::timestamp::get_timestamp();
+        let nonce = crate::utils::nonce::generate_nonce();
+        let body = body.unwrap_or("");
+        // 借用序列化后的请求体；仅签名串及 HTTP 后端按需要分配。
+        let message =
+            Sha256RsaSigner::build_sign_message(method.as_str(), path, timestamp, &nonce, body);
+        let signature = self.signer.sign(&message).await?;
+        let headers = self.build_headers(&nonce, timestamp, method, &signature, extra_headers);
+        let url = format!("{}{}", self.config.base_url(), path);
+        match method {
             HttpMethod::Get => self.http_client.get(&url, headers).await,
-            HttpMethod::Post => {
-                self.http_client
-                    .post(&url, headers, request.body_str())
-                    .await
-            }
-            HttpMethod::Put => {
-                self.http_client
-                    .put(&url, headers, request.body_str())
-                    .await
-            }
+            HttpMethod::Post => self.http_client.post(&url, headers, body).await,
+            HttpMethod::Put => self.http_client.put(&url, headers, body).await,
             HttpMethod::Delete => self.http_client.delete(&url, headers).await,
-            HttpMethod::Patch => {
-                self.http_client
-                    .patch(&url, headers, request.body_str())
-                    .await
-            }
-        };
+            HttpMethod::Patch => self.http_client.patch(&url, headers, body).await,
+        }
+    }
 
-        let elapsed_ms = started_at.elapsed().as_millis();
-        let response = match response_result {
+    fn signature_header<'a>(response: &'a HttpResponse, name: &str) -> WxPayResult<&'a str> {
+        let mut matching = response
+            .headers
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case(name));
+        let (_, value) = matching
+            .next()
+            .ok_or_else(|| WxPayError::InvalidSignatureFormat(format!("缺少响应头 {name}")))?;
+        if value.is_empty()
+            || matching.next().is_some()
+            || value.bytes().any(|byte| byte.is_ascii_control())
+        {
+            return Err(WxPayError::InvalidSignatureFormat(format!(
+                "无效或重复的响应头 {name}"
+            )));
+        }
+        Ok(value)
+    }
+
+    async fn verify_response(&self, response: &HttpResponse) -> WxPayResult<()> {
+        // 部分网关错误没有签名头：只允许交付错误，绝不视为已认证业务数据。
+        // 一旦出现任意签名头，必须完整验证，不能降级为无签名错误。
+        let signature_headers = [
+            "Wechatpay-Timestamp",
+            "Wechatpay-Nonce",
+            "Wechatpay-Serial",
+            "Wechatpay-Signature",
+            "Wechatpay-Signature-Type",
+        ];
+        if !response.is_success()
+            && !signature_headers
+                .iter()
+                .any(|name| response.get_header(name).is_some())
+        {
+            return Ok(());
+        }
+        let timestamp = Self::signature_header(response, "Wechatpay-Timestamp")?;
+        let nonce = Self::signature_header(response, "Wechatpay-Nonce")?;
+        let serial = Self::signature_header(response, "Wechatpay-Serial")?;
+        let signature = Self::signature_header(response, "Wechatpay-Signature")?;
+        if response.get_header("Wechatpay-Signature-Type").is_some()
+            && Self::signature_header(response, "Wechatpay-Signature-Type")?
+                != "WECHATPAY2-SHA256-RSA2048"
+        {
+            return Err(WxPayError::InvalidSignatureFormat(
+                "不支持的响应签名算法".to_string(),
+            ));
+        }
+        let parsed_timestamp = timestamp
+            .parse::<i64>()
+            .map_err(|_| WxPayError::InvalidSignatureFormat("无效的响应时间戳".to_string()))?;
+        if !timestamp.bytes().all(|value| value.is_ascii_digit())
+            || crate::utils::timestamp::get_timestamp().abs_diff(parsed_timestamp) > 300
+        {
+            return Err(WxPayError::SignatureVerificationFailed);
+        }
+        // 保留时间戳原文及响应原始字符串，不重新序列化 JSON。
+        let message = format!("{timestamp}\n{nonce}\n{}\n", response.body);
+        if !self
+            .trust()?
+            .verifier
+            .verify_with_serial(&message, signature, serial)
+            .await?
+        {
+            return Err(WxPayError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
+    async fn execute<T>(
+        &self,
+        method: HttpMethod,
+        path: &str,
+        body: Option<&str>,
+        operation: &str,
+        extra_headers: Vec<(String, String)>,
+        parse: impl FnOnce(&str) -> WxPayResult<T>,
+    ) -> WxPayResult<T> {
+        let started_at = Instant::now();
+        let response = match self.send(method, path, body, extra_headers).await {
             Ok(response) => response,
             Err(error) => {
-                let request_id = "-".to_string();
-                let event = TransportEvent::error(
-                    &self.config,
-                    TransportErrorContext {
-                        operation,
-                        method: request.method_str(),
-                        path,
-                        status: 0,
-                        request_id: &request_id,
-                        elapsed_ms,
-                        error: &error,
-                    },
-                );
-
-                if let Some(observer) = &self.transport_observer {
-                    observer.on_error(&event, &error);
-                }
-
-                tracing::error!(
+                self.observe(
                     operation,
-                    method = request.method_str(),
-                    path = path,
-                    status = 0,
-                    request_id = request_id,
-                    error_code = event.error_code.clone().unwrap_or("-".to_string()),
-                    error_kind = event.error_kind_label(),
-                    alert_level = event.alert_level.as_str(),
-                    alert_policy = event.alert_policy,
-                    alert_key = %event.alert_key(),
-                    should_retry = event.should_retry,
-                    is_auth_error = %error.is_auth_error(),
-                    should_alert = event.should_alert(),
-                    elapsed_ms = elapsed_ms,
-                    error = %error,
-                    "wxpay transport request failed"
+                    method,
+                    path,
+                    0,
+                    "-",
+                    started_at.elapsed().as_millis(),
+                    &Err::<(), _>(&error),
                 );
                 return Err(error);
             }
         };
-
-        let elapsed_ms = started_at.elapsed().as_millis();
-        let request_id = ResponseHandler::get_request_id(&response)
-            .unwrap_or("-")
-            .to_string();
-
-        if response.is_success() {
-            if let Some(observer) = &self.transport_observer {
-                let event = TransportEvent::success(
-                    operation,
-                    request.method_str(),
-                    path,
-                    &self.config,
-                    response.status,
-                    &request_id,
-                    elapsed_ms,
-                );
-
-                observer.on_success(&event);
-            }
-
-            tracing::info!(
-                operation,
-                method = request.method_str(),
-                path = path,
-                status = response.status,
-                request_id = request_id,
-                elapsed_ms = elapsed_ms,
-                "wxpay request success"
-            );
-            return Ok(response);
+        let request_id = ResponseHandler::get_request_id(&response).unwrap_or("-");
+        let result = async {
+            self.verify_response(&response).await?;
+            let body = ResponseHandler::handle(&response)?;
+            parse(body)
         }
+        .await;
+        self.observe(
+            operation,
+            method,
+            path,
+            response.status,
+            request_id,
+            started_at.elapsed().as_millis(),
+            &result.as_ref(),
+        );
+        result
+    }
 
-        let err = ResponseHandler::handle_error(&response);
-        match err {
-            Ok(_) => Ok(response),
+    #[allow(clippy::too_many_arguments)]
+    fn observe<T>(
+        &self,
+        operation: &str,
+        method: HttpMethod,
+        path: &str,
+        status: u16,
+        request_id: &str,
+        elapsed_ms: u128,
+        result: &Result<T, &WxPayError>,
+    ) {
+        match result {
+            Ok(_) => {
+                if let Some(observer) = &self.transport_observer {
+                    let event = TransportEvent::success(
+                        operation,
+                        method.as_str(),
+                        path,
+                        &self.config,
+                        status,
+                        request_id,
+                        elapsed_ms,
+                    );
+                    observer.on_success(&event);
+                }
+                tracing::info!(
+                    operation,
+                    method = method.as_str(),
+                    path,
+                    status,
+                    request_id,
+                    elapsed_ms,
+                    "wxpay request success"
+                );
+            }
             Err(error) => {
                 let event = TransportEvent::error(
                     &self.config,
                     TransportErrorContext {
                         operation,
-                        method: request.method_str(),
+                        method: method.as_str(),
                         path,
-                        status: response.status,
-                        request_id: &request_id,
+                        status,
+                        request_id,
                         elapsed_ms,
-                        error: &error,
+                        error,
                     },
                 );
-
                 if let Some(observer) = &self.transport_observer {
-                    observer.on_error(&event, &error);
+                    observer.on_error(&event, error);
                 }
-
-                let error_kind = event.error_kind_label();
-                let alert_key = event.alert_key();
-                let alert_level = event.alert_level.as_str();
-                let alert_policy = &event.alert_policy;
-                let should_retry = event.should_retry;
-                tracing::warn!(
-                    operation,
-                    method = request.method_str(),
-                    path = path,
-                    status = response.status,
-                    request_id = request_id,
-                    error_code = event.error_code.clone().unwrap_or("-".to_string()),
-                    error_kind = error_kind,
-                    alert_level = alert_level,
-                    alert_policy = alert_policy,
-                    alert_key = %alert_key,
-                    should_retry = should_retry,
-                    should_alert = event.should_alert(),
-                    is_auth_error = %error.is_auth_error(),
-                    elapsed_ms = elapsed_ms,
-                    error = %error,
-                    "wxpay request failed"
-                );
-                Err(error)
+                tracing::warn!(operation, method = method.as_str(), path, status, request_id, elapsed_ms,
+                    error_code = event.error_code.as_deref().unwrap_or("-"),
+                    error_kind = event.error_kind_label(), alert_level = event.alert_level.as_str(),
+                    alert_policy = event.alert_policy, alert_key = %event.alert_key(),
+                    should_retry = event.should_retry, should_alert = event.should_alert(),
+                    is_auth_error = event.is_auth_error, "wxpay request failed");
             }
         }
     }
 
-    /// 发送请求并反序列化 JSON 响应
+    /// 发送请求，验证响应签名后反序列化 JSON。
+    /// 缺少签名头的非 2xx 应答仅可产生错误，其错误内容未经过签名认证。
     pub async fn request<T: DeserializeOwned>(
         &self,
         method: HttpMethod,
@@ -405,12 +511,26 @@ impl ServiceTransport {
         body: Option<&str>,
         operation: &str,
     ) -> WxPayResult<T> {
-        let response = self.send(method, path, body, operation).await?;
-        let body = ResponseHandler::handle(&response)?;
-        serde_json::from_str(body).map_err(WxPayError::from)
+        self.request_with_headers(method, path, body, operation, Vec::new())
+            .await
     }
 
-    /// 发送请求并在空响应体时返回默认值
+    /// 携带服务层附加头发送请求并验证响应。
+    pub(crate) async fn request_with_headers<T: DeserializeOwned>(
+        &self,
+        method: HttpMethod,
+        path: &str,
+        body: Option<&str>,
+        operation: &str,
+        headers: Vec<(String, String)>,
+    ) -> WxPayResult<T> {
+        self.execute(method, path, body, operation, headers, |body| {
+            serde_json::from_str(body).map_err(WxPayError::from)
+        })
+        .await
+    }
+
+    /// 验证响应后在空响应体时返回默认值。
     pub async fn request_default<T: DeserializeOwned + Default>(
         &self,
         method: HttpMethod,
@@ -418,13 +538,14 @@ impl ServiceTransport {
         body: Option<&str>,
         operation: &str,
     ) -> WxPayResult<T> {
-        let response = self.send(method, path, body, operation).await?;
-        let body = ResponseHandler::handle(&response)?;
-        if body.trim().is_empty() {
-            return Ok(T::default());
-        }
-
-        serde_json::from_str(body).map_err(WxPayError::from)
+        self.execute(method, path, body, operation, Vec::new(), |body| {
+            if body.trim().is_empty() {
+                Ok(T::default())
+            } else {
+                serde_json::from_str(body).map_err(WxPayError::from)
+            }
+        })
+        .await
     }
 }
 
@@ -434,10 +555,13 @@ mod tests {
     use crate::auth::Sha256RsaSigner;
     use crate::config::WxPayConfig;
     use async_trait::async_trait;
+    use base64::Engine;
     use std::sync::Mutex;
 
     /// 与 auth/verifier 测试同源的测试私钥（PEM），用于构造可实际签名的签名器。
     const TEST_PRIVATE_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDQFwtb0xnMYumg\neu5lhc+Fv/XfU2hJcPnWtjhm3MVBhEM73dmsZ0yrvOxZtJhs4dfKs8BlWKvDInnz\n05+2lrDdAkNNvt0XE/0B55n2Hbk4yZIx6zOfsJlrcEoLMTfE8YNhmGeRmE+L3OJ2\nL9IAeMZW5If3T20E65+8BohE8nwLYXndXDTMZD1MAHj3fygCn2TZHKqLUf9lzYoe\naK5Wc9A8kmO6dMcefXkskvJKJZ+S/G0f+1aFcN8MaI7GFgUkdszgnElZKWxfiv/r\nXQt2T88ZcK0Apsypl5fludW9IzKjpTrJtGx8R4tVfZ0veQz3xTU7joRU7mUjByhf\nSes6QE3tAgMBAAECgf8ZVV+Mo6arELULVJaxcBj+WjW/epK3s4lhxSLDYx1LXKQo\nJa+FIw5dL3hBc5BwW7kUdHh33ikLGKdq3S4UjJlQ+XWNgYRpIDCCitpeRurF1G8i\npKp5m9u8Y29K7YhcnF/iVyuaDhuhFhh79avGDZjCpg/ni+6PKssc7llTYNy5MGya\nBNkxzXX2Oo5WI1IBOptOEUb6iWYz5FoAf91Ai0K8mFuB5tPCv67DqB2Rq4c6LMoX\nVzwzMZ64GhzYC6vyjltzMjtYTIDvheOZsOUgJe1pAaChwiGRDpmuf8/oybSQFFsy\n1PYF+TddnNk0NOQCPI0qXLHE2OXtdDAigPiA5v8CgYEA6/BnV4O/ZS34WvaGucPx\nQp9s59FolMyWtwELLxOZaO1LPAa9pdNC1+IfUl6zpeRu2z1kNG9f2TbgtTVrF7Lu\n5XvuhJ2OqnL8GgGYpS0vj2Sx5XRO8/pgxiAnpRy7Mkp1jA4+ZTpNQH3FoA6LZZfM\n1v/ijOH9NeHUWEw64OE/OoMCgYEA4ch19Yp73ijLvEUyAkqYrvPOkm7G02mlRD4T\nTUe2tGe8HUbOZGi5CphvItto9mssPDDsEVLilkrPDKlg3899L+ZLE8vHzw6QVoaK\n8LDQaapWbW3LazwLAna4kpNDd06h+Rx7j/n1lha6Vj/2dbEQhAAllos92B7SCNf8\nYIiXqs8CgYACC3tZztKB1fwpDantQj19DlSrTa1SXNORkni+V7Ukq6nTQ1uxbDtQ\nE62h0SBNd8VeMRIFQlHaWBdqeqQK+IoJgyF2FMd/wq9cqlbgV5vp6j2Ad5mXk7vy\n+6RcUfttXCfYpubziaXRwUVNNdMPdllYI6+a+Ppw1Rw6B68a89jQcQKBgFaW+JY4\njBTBdJE5wFocnb3LBxgln98IjzdCz0g+DpXVitF3jEP53a1wlH67wt9ubsKOyJpE\nPV4CRrHGa76p5oruOTDYYELKhRSJ+NMiHGvJxeelyfPQTTCes16TV7Zz066j+8dV\nx5fOE5xsX2r3gyv8mm3H7OnruAVoQAQNno0FAoGBAOvD07di46NEaY7OTGzt4JwE\nWa/0KzWvrQ6SCaHUnZ1yIqL6jEV7RCxKGr206cW9nlG2+n2QqAC8dinDrdLspLZG\noEqm/DoCUaghQOGnh7teguj3eqS+MHU5T/ugSJdJoMNtpQ/BlSnqkWLPoh+yrvh5\nmVKYyABhNkZONhC533bA\n-----END PRIVATE KEY-----\n";
+
+    const TEST_CERT_DER_B64: &str = "MIIDMTCCAhmgAwIBAgIUO0KjQ4nVBzRZyR/2689auBsGMPcwDQYJKoZIhvcNAQELBQAwJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDAgFw0yNjA2MTYwNDE3MDlaGA8yMDUzMTEwMTA0MTcwOVowJzEWMBQGA1UEAwwNd3hwYXktcnMtdGVzdDENMAsGA1UECgwEdGVzdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANAXC1vTGcxi6aB67mWFz4W/9d9TaElw+da2OGbcxUGEQzvd2axnTKu87Fm0mGzh18qzwGVYq8MiefPTn7aWsN0CQ02+3RcT/QHnmfYduTjJkjHrM5+wmWtwSgsxN8Txg2GYZ5GYT4vc4nYv0gB4xlbkh/dPbQTrn7wGiETyfAthed1cNMxkPUwAePd/KAKfZNkcqotR/2XNih5orlZz0DySY7p0xx59eSyS8koln5L8bR/7VoVw3wxojsYWBSR2zOCcSVkpbF+K/+tdC3ZPzxlwrQCmzKmXl+W51b0jMqOlOsm0bHxHi1V9nS95DPfFNTuOhFTuZSMHKF9J6zpATe0CAwEAAaNTMFEwHQYDVR0OBBYEFGo+jzczvrST9JVBo875auuysJS3MB8GA1UdIwQYMBaAFGo+jzczvrST9JVBo875auuysJS3MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAChV2tnTzVIRbSHRrP0unCUYxf9mPldpVVB3Zbzb+S1oMllYwtUuNCgOuaIWz8LlA2A9yEoV5zvPJfrQFNJ3KYrMyAXJ7Q9UDFMSpP5aaqvtIq1GcLfw8EiyuGN3nQwHBPA2AN3JznDufWY5LI2TLDwiX/mv8U4ZzWHMOye7huI3AEIVTXv01NXWleI2TA/MxTMppaO8t5lzlaDXgPMnZqW5qsuHZzGk+aq07SO9KitKO4E5PoNYfE6ywWn13mOZrRklCtT9mauaE/kCHIAQPuyfWrZ2lvkjWIefQ/onZBxAKP5z6VcSb3Z/3G85MQm9kSnwUFjKw7yuauDv/wyq/AU=";
 
     fn test_config() -> Arc<WxPayConfig> {
         let config = WxPayConfig::builder()
@@ -446,6 +570,11 @@ mod tests {
             .api_v3_key("abcdefghijklmnopqrstuvwxyz123456")
             .private_key(TEST_PRIVATE_KEY_PEM.as_bytes().to_vec())
             .cert_serial_number("CERT123456")
+            .platform_certificate(
+                base64::engine::general_purpose::STANDARD
+                    .decode(TEST_CERT_DER_B64)
+                    .unwrap(),
+            )
             .build()
             .unwrap();
         Arc::new(config)
@@ -479,6 +608,23 @@ mod tests {
                 captured_body: Mutex::new(None),
             }
         }
+        async fn signed_response(&self) -> HttpResponse {
+            let mut response = self.response.clone();
+            let timestamp = crate::utils::timestamp::get_timestamp().to_string();
+            let nonce = "response-nonce";
+            let message = format!("{timestamp}\n{nonce}\n{}\n", response.body);
+            let signature = test_signer().sign(&message).await.unwrap();
+            response.headers.extend([
+                ("Wechatpay-Timestamp".into(), timestamp),
+                ("Wechatpay-Nonce".into(), nonce.into()),
+                (
+                    "Wechatpay-Serial".into(),
+                    "3B42A34389D5073459C91FF6EBCF5AB81B0630F7".into(),
+                ),
+                ("Wechatpay-Signature".into(), signature),
+            ]);
+            response
+        }
     }
 
     #[async_trait]
@@ -490,7 +636,7 @@ mod tests {
         ) -> WxPayResult<HttpResponse> {
             *self.captured_url.lock().unwrap() = Some(url.to_string());
             *self.captured_headers.lock().unwrap() = headers.clone();
-            Ok(self.response.clone())
+            Ok(self.signed_response().await)
         }
         async fn post(
             &self,
@@ -501,7 +647,7 @@ mod tests {
             *self.captured_url.lock().unwrap() = Some(url.to_string());
             *self.captured_headers.lock().unwrap() = headers.clone();
             *self.captured_body.lock().unwrap() = Some(body.to_string());
-            Ok(self.response.clone())
+            Ok(self.signed_response().await)
         }
         async fn put(
             &self,
@@ -512,7 +658,7 @@ mod tests {
             *self.captured_url.lock().unwrap() = Some(url.to_string());
             *self.captured_headers.lock().unwrap() = headers;
             *self.captured_body.lock().unwrap() = Some(body.to_string());
-            Ok(self.response.clone())
+            Ok(self.signed_response().await)
         }
         async fn delete(
             &self,
@@ -521,7 +667,7 @@ mod tests {
         ) -> WxPayResult<HttpResponse> {
             *self.captured_url.lock().unwrap() = Some(url.to_string());
             *self.captured_headers.lock().unwrap() = headers;
-            Ok(self.response.clone())
+            Ok(self.signed_response().await)
         }
         async fn patch(
             &self,
@@ -532,7 +678,7 @@ mod tests {
             *self.captured_url.lock().unwrap() = Some(url.to_string());
             *self.captured_headers.lock().unwrap() = headers;
             *self.captured_body.lock().unwrap() = Some(body.to_string());
-            Ok(self.response.clone())
+            Ok(self.signed_response().await)
         }
     }
 
@@ -753,5 +899,52 @@ mod tests {
         assert_eq!(err_evt.error_kind_label(), "non_api");
         assert!(err_evt.should_alert());
         assert_eq!(err_evt.alert_key(), "critical.network");
+    }
+
+    #[tokio::test]
+    async fn explicit_encryption_serial_survives_public_key_rotation_without_duplication() {
+        use der::{Decode, Encode};
+        let http = Arc::new(MockHttpClient::new(200, "{}"));
+        let transport = build_transport(http.clone());
+        let mut name = "张三".to_string();
+        let serial = transport
+            .encrypt_sensitive_fields(&mut [&mut name])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(name, "张三");
+        let certificate = base64::engine::general_purpose::STANDARD
+            .decode(TEST_CERT_DER_B64)
+            .unwrap();
+        let key = x509_cert::Certificate::from_der(&certificate)
+            .unwrap()
+            .tbs_certificate()
+            .subject_public_key_info()
+            .to_der()
+            .unwrap();
+        transport
+            .trust()
+            .unwrap()
+            .cert_manager
+            .add_public_key("PUB_KEY_ID_NEW".into(), key)
+            .await
+            .unwrap();
+        let _: serde_json::Value = transport
+            .request_with_headers(
+                HttpMethod::Post,
+                "/v3/test",
+                Some("{}"),
+                "encrypted",
+                vec![("wechatpay-serial".to_string(), serial.clone())],
+            )
+            .await
+            .unwrap();
+        let headers = http.captured_headers.lock().unwrap();
+        let serials: Vec<_> = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("Wechatpay-Serial"))
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(serials, vec![&serial]);
     }
 }

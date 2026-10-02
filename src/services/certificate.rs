@@ -3,12 +3,11 @@
 //! 提供微信支付证书管理功能。
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 
 use crate::auth::Signer;
 use crate::config::WxPayConfig;
-use crate::error::{WxPayError, WxPayResult};
+use crate::error::WxPayResult;
 use crate::http::{HttpClient, HttpMethod};
 use crate::services::transport::{ServiceTransport, TransportObserver};
 
@@ -79,6 +78,20 @@ pub struct CertificateService {
 }
 
 impl CertificateService {
+    pub(crate) fn from_transport(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport: ServiceTransport,
+    ) -> Self {
+        Self {
+            config,
+            http_client,
+            signer,
+            transport,
+        }
+    }
+
     /// 创建新的证书服务
     pub fn new(
         config: Arc<WxPayConfig>,
@@ -109,7 +122,13 @@ impl CertificateService {
 
     /// 获取证书列表
     pub async fn get_certificates(&self) -> WxPayResult<Vec<CertificateInfo>> {
-        let response_json: Value = self
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Response {
+            Wrapped { data: Vec<CertificateInfo> },
+            Direct(Vec<CertificateInfo>),
+        }
+        let response: Response = self
             .transport
             .request(
                 HttpMethod::Get,
@@ -118,25 +137,9 @@ impl CertificateService {
                 "certificate.get_certificates",
             )
             .await?;
-
-        let certificate_items = response_json
-            .get("data")
-            .and_then(|v| v.as_array())
-            .or_else(|| response_json.as_array())
-            .ok_or_else(|| {
-                WxPayError::CertificateParseError("证书接口响应缺少 data 字段".to_string())
-            })?;
-
-        let mut certificates = Vec::with_capacity(certificate_items.len());
-
-        for item in certificate_items {
-            let info: CertificateInfo = serde_json::from_value(item.clone()).map_err(|e| {
-                WxPayError::CertificateParseError(format!("证书信息解析失败：{}", e))
-            })?;
-            certificates.push(info);
-        }
-
-        Ok(certificates)
+        Ok(match response {
+            Response::Wrapped { data } | Response::Direct(data) => data,
+        })
     }
 }
 

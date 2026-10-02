@@ -8,11 +8,11 @@ pub use builder::WxPayClientBuilder;
 
 use std::sync::Arc;
 
-use crate::auth::{Credentials, Sha256RsaSigner, Sha256RsaVerifier, Signer, Verifier};
+use crate::auth::{Credentials, Signer, Verifier};
 use crate::cert::CertManager;
 use crate::config::WxPayConfig;
 use crate::error::WxPayResult;
-use crate::http::{HttpClient, ReqwestHttpClient};
+use crate::http::HttpClient;
 use crate::notify::NotifyHandler;
 use crate::services::certificate::CertificateService;
 use crate::services::payments::{AppService, H5Service, JsapiService, NativeService};
@@ -23,7 +23,7 @@ use crate::services::profit_sharing::{
 use crate::services::query::{QueryService, Transaction};
 use crate::services::refund::{RefundResponse, RefundService};
 use crate::services::transfer::{TransferRequest, TransferResponse, TransferService};
-use crate::services::transport::TransportObserver;
+use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 微信支付客户端
 ///
@@ -73,6 +73,9 @@ pub struct WxPayClient {
     /// 证书管理器
     cert_manager: Arc<CertManager>,
 
+    /// 复用通知解密器及共享验签上下文
+    notify_handler: NotifyHandler,
+
     /// 服务注册表
     services: ServiceRegistry,
 }
@@ -95,62 +98,62 @@ impl WxPayClient {
         config: &Arc<WxPayConfig>,
         http_client: &Arc<dyn HttpClient>,
         signer: &Arc<dyn Signer>,
-        transport_observer: Option<Arc<dyn TransportObserver>>,
+        transport: ServiceTransport,
     ) -> ServiceRegistry {
         ServiceRegistry {
-            jsapi: Arc::new(JsapiService::new_with_observer(
+            jsapi: Arc::new(JsapiService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            native: Arc::new(NativeService::new_with_observer(
+            native: Arc::new(NativeService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            h5: Arc::new(H5Service::new_with_observer(
+            h5: Arc::new(H5Service::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            app: Arc::new(AppService::new_with_observer(
+            app: Arc::new(AppService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            refund: Arc::new(RefundService::new_with_observer(
+            refund: Arc::new(RefundService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            transfer: Arc::new(TransferService::new_with_observer(
+            transfer: Arc::new(TransferService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            profitsharing: Arc::new(ProfitSharingService::new_with_observer(
+            profitsharing: Arc::new(ProfitSharingService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            certificates: Arc::new(CertificateService::new_with_observer(
+            certificates: Arc::new(CertificateService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer.clone(),
+                transport.clone(),
             )),
-            query: Arc::new(QueryService::new_with_observer(
+            query: Arc::new(QueryService::from_transport(
                 config.clone(),
                 http_client.clone(),
                 signer.clone(),
-                transport_observer,
+                transport.clone(),
             )),
         }
     }
@@ -161,11 +164,34 @@ impl WxPayClient {
         signer: Arc<dyn Signer>,
         verifier: Arc<dyn Verifier>,
         cert_manager: Arc<CertManager>,
+        require_active_key: bool,
         transport_observer: Option<Arc<dyn TransportObserver>>,
     ) -> WxPayResult<Self> {
+        config.validate()?;
         let config = Arc::new(config);
         let credentials = Arc::new(Credentials::from_config(&config));
-        let services = Self::create_services(&config, &http_client, &signer, transport_observer);
+        let transport = ServiceTransport::new_with_verifier(
+            config.clone(),
+            http_client.clone(),
+            signer.clone(),
+            verifier.clone(),
+            cert_manager.clone(),
+            require_active_key,
+            transport_observer.clone(),
+        );
+        let services = Self::create_services(&config, &http_client, &signer, transport);
+        let notify_config = crate::config::NotifyConfig::builder()
+            .api_v3_key(&config.api_v3_key)
+            .cert_serial_number(&config.cert_serial_number)
+            .platform_certificate(
+                config
+                    .platform_certificates
+                    .first()
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+            .build()?;
+        let notify_handler = NotifyHandler::new(notify_config, verifier.clone())?;
 
         Ok(Self {
             config,
@@ -174,6 +200,7 @@ impl WxPayClient {
             signer,
             verifier,
             cert_manager,
+            notify_handler,
             services,
         })
     }
@@ -188,32 +215,7 @@ impl WxPayClient {
     ///
     /// 返回客户端实例
     pub async fn new(config: WxPayConfig) -> WxPayResult<Self> {
-        let config = Arc::new(config);
-        let http_client: Arc<dyn HttpClient> = Arc::new(
-            ReqwestHttpClient::builder()
-                .timeout(config.timeout)
-                .max_retries(config.max_retries)
-                .build()?,
-        );
-        let signer: Arc<dyn Signer> = Arc::new(Sha256RsaSigner::new(
-            &config.merchant_id,
-            &config.private_key,
-            &config.cert_serial_number,
-        )?);
-        let verifier: Arc<dyn Verifier> = Arc::new(Sha256RsaVerifier::new(
-            config.platform_certificates.clone(),
-        )?);
-        let cert_manager = Arc::new(CertManager::new());
-
-        Self::new_with_components(
-            (*config).clone(),
-            http_client,
-            signer,
-            verifier,
-            cert_manager,
-            None,
-        )
-        .await
+        Self::builder().config(config).build().await
     }
 
     /// 创建客户端构建器
@@ -368,21 +370,9 @@ impl WxPayClient {
         self.profitsharing().finish_order(request).await
     }
 
-    /// 创建通知处理器
+    /// 获取复用解密器和验签上下文的通知处理器。
     pub fn notify_handler(&self) -> WxPayResult<NotifyHandler> {
-        let config = crate::config::NotifyConfig::builder()
-            .api_v3_key(&self.config.api_v3_key)
-            .cert_serial_number(&self.config.cert_serial_number)
-            .platform_certificate(
-                self.config
-                    .platform_certificates
-                    .first()
-                    .cloned()
-                    .unwrap_or_default(),
-            )
-            .build()?;
-
-        NotifyHandler::new(config, self.verifier.clone())
+        Ok(self.notify_handler.clone())
     }
 }
 

@@ -134,6 +134,20 @@ pub struct AppService {
 }
 
 impl AppService {
+    pub(crate) fn from_transport(
+        config: Arc<WxPayConfig>,
+        http_client: Arc<dyn HttpClient>,
+        signer: Arc<dyn Signer>,
+        transport: ServiceTransport,
+    ) -> Self {
+        Self {
+            config,
+            http_client,
+            signer,
+            transport,
+        }
+    }
+
     /// 创建新的 APP 服务
     pub fn new(
         config: Arc<WxPayConfig>,

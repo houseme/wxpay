@@ -101,7 +101,7 @@ impl WxPayClientBuilder {
         let config = self
             .config
             .ok_or_else(|| WxPayError::missing_config("config"))?;
-        let config = Arc::new(config);
+        config.validate()?;
 
         // 创建或使用提供的 HTTP 客户端
         let http_client: Arc<dyn HttpClient> = match self.http_client {
@@ -124,25 +124,34 @@ impl WxPayClientBuilder {
             )?),
         };
 
-        // 创建或使用提供的验签器
-        let verifier: Arc<dyn Verifier> = match self.verifier {
-            Some(verifier) => verifier,
-            None => Arc::new(Sha256RsaVerifier::new(
+        // 证书轮换与响应/通知验签复用同一份已解析密钥存储。
+        let cert_manager = match self.cert_manager {
+            Some(manager) => {
+                manager
+                    .add_certificates(config.platform_certificates.clone())
+                    .await?;
+                for (id, key) in &config.platform_public_keys {
+                    manager.add_public_key(id.clone(), key.clone()).await?;
+                }
+                manager
+            }
+            None => Arc::new(CertManager::from_material(
                 config.platform_certificates.clone(),
+                config.platform_public_keys.clone(),
             )?),
         };
-
-        // 创建或使用提供的证书管理器
-        let cert_manager = self
-            .cert_manager
-            .unwrap_or_else(|| Arc::new(CertManager::new()));
+        let require_active_key = self.verifier.is_none();
+        let verifier: Arc<dyn Verifier> = self
+            .verifier
+            .unwrap_or_else(|| Arc::new(Sha256RsaVerifier::from_manager(cert_manager.clone())));
 
         WxPayClient::new_with_components(
-            (*config).clone(),
+            config,
             http_client,
             signer,
             verifier,
             cert_manager,
+            require_active_key,
             self.transport_observer,
         )
         .await
