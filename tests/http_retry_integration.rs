@@ -158,3 +158,106 @@ async fn get_does_not_retry_on_4xx() {
     // 4xx（非 429）不应触发重试：仅 1 次请求。
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn preserves_utf8_bytes_despite_misleading_charset() {
+    let server = MockServer::start().await;
+    let original = "{\"message\":\"支付成功\"}";
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(original, "application/json; charset=windows-1252"),
+        )
+        .mount(&server)
+        .await;
+    let response = client_no_retry().get(&server.uri(), vec![]).await.unwrap();
+    assert_eq!(response.body.as_bytes(), original.as_bytes());
+}
+
+#[tokio::test]
+async fn rejects_invalid_utf8_instead_of_replacing_bytes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(vec![0xff, 0xfe], "application/json"))
+        .mount(&server)
+        .await;
+    let result = client_no_retry().get(&server.uri(), vec![]).await;
+    assert!(matches!(
+        result,
+        Err(wxpay_rs::WxPayError::ResponseParseError(_))
+    ));
+}
+
+#[tokio::test]
+async fn rejects_responses_above_configured_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("123456789"))
+        .mount(&server)
+        .await;
+    let client = ReqwestHttpClient::builder()
+        .max_response_bytes(8)
+        .build()
+        .unwrap();
+    assert!(matches!(
+        client.get(&server.uri(), vec![]).await,
+        Err(wxpay_rs::WxPayError::ResponseParseError(_))
+    ));
+}
+
+#[tokio::test]
+async fn does_not_follow_redirects_with_signed_credentials() {
+    let server = MockServer::start().await;
+    let destination = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(302).insert_header("Location", destination.uri()))
+        .mount(&server)
+        .await;
+    let response = client_no_retry()
+        .get(
+            &server.uri(),
+            vec![("Authorization".into(), "signature".into())],
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status, 302);
+    assert!(destination.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn post_is_not_retried_after_server_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let client = ReqwestHttpClient::builder().max_retries(3).build().unwrap();
+    assert_eq!(
+        client
+            .post(&server.uri(), vec![], "{}")
+            .await
+            .unwrap()
+            .status,
+        503
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn retry_after_is_honored_within_the_total_deadline() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "60"))
+        .mount(&server)
+        .await;
+    let client = ReqwestHttpClient::builder()
+        .timeout(1)
+        .max_retries(3)
+        .build()
+        .unwrap();
+    assert!(matches!(
+        client.get(&server.uri(), vec![]).await,
+        Err(wxpay_rs::WxPayError::Timeout)
+    ));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}

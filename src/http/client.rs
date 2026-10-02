@@ -106,6 +106,8 @@ pub struct ReqwestHttpClient {
 
     /// 最大重试次数
     max_retries: u32,
+    total_timeout: Duration,
+    max_response_bytes: usize,
 }
 
 impl ReqwestHttpClient {
@@ -124,7 +126,13 @@ impl ReqwestHttpClient {
         base.saturating_add(jitter)
     }
 
-    async fn read_response(response: reqwest::Response) -> WxPayResult<HttpResponse> {
+    async fn read_response(&self, mut response: reqwest::Response) -> WxPayResult<HttpResponse> {
+        if response
+            .content_length()
+            .is_some_and(|len| len > self.max_response_bytes as u64)
+        {
+            return Err(WxPayError::ResponseParseError("响应体超过配置上限".into()));
+        }
         let status = response.status().as_u16();
         let response_headers: Vec<(String, String)> = response
             .headers()
@@ -132,15 +140,48 @@ impl ReqwestHttpClient {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| WxPayError::ResponseParseError(format!("读取响应体失败：{}", e)))?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(WxPayError::NetworkError)? {
+            if chunk.len() > self.max_response_bytes.saturating_sub(bytes.len()) {
+                return Err(WxPayError::ResponseParseError("响应体超过配置上限".into()));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        // Signature verification must see the original UTF-8 bytes, never charset transcoding.
+        let body = String::from_utf8(bytes)
+            .map_err(|_| WxPayError::ResponseParseError("响应体不是有效的 UTF-8".into()))?;
 
         Ok(HttpResponse::new(status, response_headers, body))
     }
 
     async fn execute_with_retries<F>(
+        &self,
+        request_factory: F,
+        retry_on_error: bool,
+    ) -> WxPayResult<HttpResponse>
+    where
+        F: FnMut() -> reqwest::RequestBuilder,
+    {
+        tokio::time::timeout(
+            self.total_timeout,
+            self.execute_attempts(request_factory, retry_on_error),
+        )
+        .await
+        .map_err(|_| WxPayError::Timeout)?
+    }
+
+    fn retry_after(response: &HttpResponse) -> Option<Duration> {
+        let value = response.get_header("Retry-After")?.trim();
+        if let Ok(seconds) = value.parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+        let date = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+        (date.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .to_std()
+            .ok()
+    }
+
+    async fn execute_attempts<F>(
         &self,
         mut request_factory: F,
         retry_on_error: bool,
@@ -154,13 +195,15 @@ impl ReqwestHttpClient {
             match response {
                 Ok(response) => {
                     let status = response.status().as_u16();
-                    let response = Self::read_response(response).await?;
+                    let response = self.read_response(response).await?;
 
                     if retry_on_error
                         && Self::is_retriable_status(status)
                         && attempt < self.max_retries
                     {
-                        let delay = Duration::from_millis(Self::retry_delay_ms(attempt + 1));
+                        let delay = Self::retry_after(&response).unwrap_or_else(|| {
+                            Duration::from_millis(Self::retry_delay_ms(attempt + 1))
+                        });
                         sleep(delay).await;
                         continue;
                     }
@@ -168,7 +211,10 @@ impl ReqwestHttpClient {
                     return Ok(response);
                 }
                 Err(error) => {
-                    if retry_on_error && attempt < self.max_retries {
+                    if retry_on_error
+                        && (error.is_connect() || error.is_timeout())
+                        && attempt < self.max_retries
+                    {
                         let delay = Duration::from_millis(Self::retry_delay_ms(attempt + 1));
                         sleep(delay).await;
                         continue;
@@ -203,6 +249,7 @@ pub struct ReqwestHttpClientBuilder {
     max_idle_connections: usize,
     idle_timeout: u64,
     max_retries: u32,
+    max_response_bytes: usize,
 }
 
 impl ReqwestHttpClientBuilder {
@@ -213,10 +260,11 @@ impl ReqwestHttpClientBuilder {
             max_idle_connections: 100,
             idle_timeout: 90,
             max_retries: 3,
+            max_response_bytes: 8 * 1024 * 1024,
         }
     }
 
-    /// 设置请求超时时间（秒）
+    /// 设置整个请求的超时时间（秒），包括重试等待和读取响应体。
     pub fn timeout(mut self, timeout: u64) -> Self {
         self.timeout = timeout;
         self
@@ -234,15 +282,28 @@ impl ReqwestHttpClientBuilder {
         self
     }
 
-    /// 设置请求最大重试次数（重试 5xx、429 与网络错误）
+    /// 设置 GET/DELETE 最大重试次数（5xx、429、连接失败和超时）。
     pub fn max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
     }
 
+    /// 设置响应体大小上限（字节），默认 8 MiB。
+    pub fn max_response_bytes(mut self, limit: usize) -> Self {
+        self.max_response_bytes = limit;
+        self
+    }
+
     /// 构建 HTTP 客户端
     pub fn build(self) -> WxPayResult<ReqwestHttpClient> {
+        if self.timeout == 0 || self.max_response_bytes == 0 {
+            return Err(WxPayError::invalid_parameter(
+                "timeout 和 max_response_bytes 必须大于零",
+            ));
+        }
         let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .timeout(Duration::from_secs(self.timeout))
             .pool_max_idle_per_host(self.max_idle_connections)
             .pool_idle_timeout(Duration::from_secs(self.idle_timeout))
@@ -254,6 +315,8 @@ impl ReqwestHttpClientBuilder {
         Ok(ReqwestHttpClient {
             client,
             max_retries: self.max_retries,
+            total_timeout: Duration::from_secs(self.timeout),
+            max_response_bytes: self.max_response_bytes,
         })
     }
 }

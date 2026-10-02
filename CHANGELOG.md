@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### HTTP 传输边界
+
+- 按响应原始字节读取并严格验证 UTF-8，避免 charset 转码或替换字符改变验签内容
+- 默认限制响应体为 8 MiB，可通过 `max_response_bytes` 调整；禁止自动跳转和 reqwest 隐式重试
+- HTTP timeout 现在覆盖完整请求、响应体读取及全部重试等待；GET/DELETE 遵守 `Retry-After`，
+  只重试适用状态、连接失败和超时，POST/PUT/PATCH 保持不自动重试
+
 ### 回调通知
 
 - 通知模型对齐 `event_type`，保留旧 `type` 的输入兼容；支持退款成功、异常、关闭事件
