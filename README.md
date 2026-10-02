@@ -7,15 +7,15 @@
 
 提供 JSAPI、小程序、Native、H5、APP 支付，以及订单查询、退款、分账和批量转账接口。基于 Tokio 和 reqwest，支持请求签名、响应验签、平台证书或公钥管理、RSA-OAEP 敏感字段加密和 AES-256-GCM 通知解密。
 
-本 README 对应当前源码；发布版本及兼容性变化见 [CHANGELOG](CHANGELOG.md)。`docs` feature 将本文的 Rust 示例纳入文档编译检查。
+本 README 对应 `wxpay-rs 2.1.0`；完整发布记录见 [CHANGELOG](CHANGELOG.md#210---2026-10-02)。`docs` feature 将本文的 Rust 示例纳入文档编译检查。
 
 ## 安装
 
-本文包含尚未发布的下一主版本修复和 API。已发布的 `wxpay-rs 2.0.2` 不包含这些变更；在下一主版本发布前，请检出当前源码，通过本地路径依赖使用，并按实际检出位置调整路径。
+`2.1.0` 修正了 `2.0.x` 的支付协议、验签与加密行为，并包含源码不兼容的模型调整。升级前请阅读下方的迁移说明；建议先固定为 `=2.1.0`，完成应用验证后再选择兼容版本范围。
 
 ```toml
 [dependencies]
-wxpay-rs = { path = "../wxpay" }
+wxpay-rs = "=2.1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde_json = "1"
 ```
@@ -187,8 +187,24 @@ async fn verify_payment(
 
 ## 加密与升级注意事项
 
+从 `2.0.x` 升级时，请按下面的变化调整调用方。此次版本号为 `2.1.0`，但以下 API 修正并非完全向后兼容。
+
+| 范围 | 2.1.0 迁移要求 |
+| --- | --- |
+| 订单查询 | `Transaction.transaction_id` 改为 `Option<String>`；未支付订单可能没有微信支付单号。 |
+| 转账查询 | 使用 `QueryTransferBatchResponse.transfer_batch` 读取批次；成功/失败计数可能为 `None`，不能等同于零。 |
+| 转账创建 | 应答包含 `create_time`，`batch_status` 改为可选字段。 |
+| 分账结果 | 将 `status` 改为 `state`，并检查每个接收方的处理结果；整体完成不代表所有接收方都成功。 |
+| 敏感姓名 | 传入明文，由 SDK 使用平台密钥加密；移除调用方原有的预加密步骤，避免重复加密。 |
+| JSAPI 参数 | 使用正确的 `appId`、`timeStamp`、`nonceStr`、`package`、`signType`、`paySign` 字段；按下单 AppID 生成签名。 |
+| 通知入口 | 使用 `verify_and_parse` 接收原始 body 与完整签名头，再调用已验签通知处理方法。 |
+| 信任配置 | 默认客户端发送请求前必须具备有效平台证书或公钥；优先通过 `WxPayConfig::builder()` 配置新增字段。 |
+| 证书刷新 | `start_auto_refresh()` 返回 `Result<CertRefreshHandle>`；保存句柄，释放或取消句柄会停止刷新。 |
+| RSA 签名 | 内置签名器需要 Tokio 运行时，队列满时返回 `SignError`；可通过 `with_signing_capacity` 调整容量。 |
+
 - APIv3 请求和调起支付使用 SHA256-RSA。敏感字段使用微信支付要求的 RSA-OAEP-SHA1，RSA 后端为 `aws-lc-rs`。
-- `Aes256GcmCipher::new` 直接使用 32 字节 APIv3 密钥。旧版本额外哈希密钥的本地自加密数据需要通过显式旧格式迁移入口读取；通知和证书解密必须使用标准入口。迁移说明见 [CHANGELOG](CHANGELOG.md)。
+- `Aes256GcmCipher::new` 直接使用 32 字节 APIv3 密钥。旧版本本地自加密数据使用 `Aes256GcmCipher::from_legacy_sha256_key` 或 `RsaOaepDecrypter::decrypt_legacy_sha256` 显式迁移；微信支付通知和证书不能使用这些旧格式入口。
+- RSA 公钥加密及验签支持 2048 至 8192 位密钥。旧 `rsa::Error`、`pkcs8::Error` 到 `WxPayError` 的自动转换已移除，外部后端应自行映射错误。
 - 配置和凭据的 `Debug` 输出隐藏密钥。应用仍需避免记录通知全文、请求签名、个人信息或商户私钥。
 - 复用 `WxPayClient` 和通知处理器；客户端共享 HTTP 连接池及验签密钥。性能变化应通过同一环境的基准和并发延迟测量确认。
 

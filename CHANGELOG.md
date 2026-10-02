@@ -3,20 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and compatibility changes are documented explicitly for each release.
 
 ## [Unreleased]
+
+## [2.1.0] - 2026-10-02
+
+本版本修复支付协议及安全边界，并包含相对于 `2.0.x` 的源码和行为不兼容变化。
+虽然版本号为 `2.1.0`，升级仍需按 [README 迁移说明](README.md#加密与升级注意事项) 调整调用方，
+尤其是响应模型、原始通知验签、姓名加密、信任材料和旧密文读取。
 
 ### 文档与验证
 
 - 重写 README 为当前可编译 API，删除不存在的上传接口、配置类型和本机路径；
-  明确源码依赖、秒级 timeout、平台信任配置、认证 bootstrap、刷新句柄及真实业务接收责任
+  明确 2.1.0 安装、秒级 timeout、平台信任配置、认证 bootstrap、刷新句柄及真实业务接收责任
 - `docs` feature 将 README 示例纳入 doctest；CI 实际执行默认及无默认 feature 检查，
   扩大到所有 targets，使用锁文件并将 Clippy 警告作为错误
 - 示例通过平台证书或公钥 ID/PEM 配置可信材料，缺少配置时跳过真实调用
 - 升级注意：RSA 公钥加密和验签要求受支持的 2048 至 8192 位密钥；
   移除对旧后端 `rsa::Error`、`pkcs8::Error` 的 `From` 实现。
-  新增公开配置字段及前述响应类型变更需调用方适配，下一主版本发布前使用源码依赖验证
+  新增公开配置字段及响应类型变更需调用方适配，建议固定 `=2.1.0` 完成升级验证
 
 ### 支付与资金接口
 
@@ -29,8 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   创建应答包含 `create_time`、可选 `batch_status`，早期批次成功/失败计数为可选值
 - 转账及分账的姓名参数现在接收明文，由同一次请求的平台密钥快照加密并携带对应 `Wechatpay-Serial`；
   不应继续由调用方预加密，避免双重加密；无姓名时避免复制整个请求
-- 更新查单、退款、转账和分账示例及独立契约测试。以上响应字段和返回类型修正包含源码不兼容变化，
-  将随下一主版本发布；当前版本号未代表这些修复已发布到 crates.io
+- 更新查单、退款、转账和分账示例及独立契约测试；本版本包含上述响应字段和返回类型修正
 
 ### 业务响应认证
 
@@ -88,7 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tokio-rustls 0.26.6`、`rustls-platform-verifier 0.7.1` 与 `zerocopy 0.8.59`；
   移除不再使用的 `multiversion`、`multiversion-macros` 传递依赖
 - 更新 `aes-gcm` 到 `0.11.1`、`uuid` 到 `1.26`、`der` 锁定到 `0.8.2`（传递依赖全量刷新：`rustls`、`hyper`、`hickory`、`tokio-rustls` 等）
-- 更新开发依赖 `actix-web` 到 `4.15`
 
 ### 性能优化
 
