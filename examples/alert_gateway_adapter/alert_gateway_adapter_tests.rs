@@ -110,10 +110,6 @@ impl ConcurrencyMockGateway {
     fn max_concurrency_observed(&self) -> usize {
         self.max_active.load(Ordering::Acquire)
     }
-
-    fn call_count(&self) -> usize {
-        self.max_active.load(Ordering::Acquire)
-    }
 }
 
 impl AlertGateway for ConcurrencyMockGateway {
@@ -412,4 +408,32 @@ async fn alert_gateway_stress_high_concurrency_should_stabilize_under_limit() {
         start.elapsed() <= Duration::from_secs(8),
         "stress window should be bounded, avoid spike-driven stall"
     );
+}
+
+#[tokio::test]
+async fn alert_gateway_bounds_pending_tasks_before_spawn() {
+    let gateway = Arc::new(MockAlertGateway::script_success());
+    let observer = AlertGatewayAdapter::new(vec!["critical.".into()])
+        .with_thresholds(10_000, 1, 60)
+        .with_gateway("https://alert.example.com/events", None)
+        .with_gateway_client(gateway.clone())
+        .with_concurrency_limit(1)
+        .with_pending_limit(2)
+        .with_fallback_to_stdout(false);
+    let (event, error) = critical_test_event();
+    for _ in 0..100 {
+        observer.on_error(&event, &error);
+    }
+    // This current-thread runtime has not yielded: exactly two tasks were admitted.
+    assert_eq!(observer.dropped_alerts(), 98);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while observer.pending.available_permits() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(gateway.call_count(), 2);
+    observer.on_error(&event, &error);
+    assert_eq!(observer.dropped_alerts(), 98);
 }

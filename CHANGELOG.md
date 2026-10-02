@@ -81,6 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 性能优化
 
+- 告警网关示例在创建异步任务前限制总待处理数量，默认最多 256 个执行及等待任务；
+  超限计入 `dropped_alerts`，支持 `with_pending_limit`，避免并发限制之外仍积累无界等待任务
 - `ServiceTransport::build_headers`：每次请求的 `Authorization` 头构建改为预分配容量 + `write!` 就地写入，去除 `format!` 临时分配
 - `Sha256RsaVerifier::build_verify_message`：验签消息构建与签名路径对齐，预分配容量并就地格式化时间戳
 - `ReqwestHttpClient`：POST/PUT/PATCH 请求体由"入参拷贝 + 每次重试再克隆"改为闭包借用 `&str` 按需分配，正常路径减少一次请求体拷贝

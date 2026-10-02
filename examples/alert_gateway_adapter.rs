@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -56,6 +57,10 @@ pub struct AlertGatewayAdapter {
     /// 并发控制信号量
     semaphore: Arc<Semaphore>,
 
+    /// 执行与等待任务总容量；在 spawn 前获取，避免队列无界增长。
+    pending: Arc<Semaphore>,
+    dropped_alerts: Arc<AtomicU64>,
+
     /// 可插拔的网关发送器（默认 HttpAlertGateway）
     gateway_client: Arc<dyn AlertGateway>,
 
@@ -85,6 +90,8 @@ impl AlertGatewayAdapter {
             retry_max_backoff_ms: 2000,
             concurrency_limit: 8,
             semaphore: Arc::new(Semaphore::new(8)),
+            pending: Arc::new(Semaphore::new(256)),
+            dropped_alerts: Arc::new(AtomicU64::new(0)),
             gateway_client: Arc::new(HttpAlertGateway),
             fallback_sink: None,
         }
@@ -139,10 +146,21 @@ impl AlertGatewayAdapter {
     }
 
     pub fn with_concurrency_limit(mut self, concurrency_limit: usize) -> Self {
-        let limit = concurrency_limit.max(1);
+        let limit = concurrency_limit.clamp(1, Semaphore::MAX_PERMITS);
         self.concurrency_limit = limit;
         self.semaphore = Arc::new(Semaphore::new(limit));
         self
+    }
+
+    /// 限制已提交的告警任务总数（执行与等待合计），默认 256。
+    /// 超限丢弃新告警并增加 dropped_alerts，调用方可据此监控过载。
+    pub fn with_pending_limit(mut self, limit: usize) -> Self {
+        self.pending = Arc::new(Semaphore::new(limit.clamp(1, Semaphore::MAX_PERMITS)));
+        self
+    }
+
+    pub fn dropped_alerts(&self) -> u64 {
+        self.dropped_alerts.load(Ordering::Relaxed)
     }
 
     fn match_route(&self, alert_key: &str) -> bool {
@@ -252,7 +270,12 @@ impl TransportObserver for AlertGatewayAdapter {
 
         match (endpoint, Handle::try_current()) {
             (Some(url), Ok(handle)) => {
+                let Ok(pending) = self.pending.clone().try_acquire_owned() else {
+                    self.dropped_alerts.fetch_add(1, Ordering::Relaxed);
+                    return;
+                };
                 handle.spawn(async move {
+                    let _pending = pending;
                     let _permit = match semaphore.acquire_owned().await {
                         Ok(permit) => permit,
                         Err(_) => return,
