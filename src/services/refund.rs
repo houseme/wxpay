@@ -15,21 +15,25 @@ use crate::services::transport::{ServiceTransport, TransportObserver};
 #[derive(Debug, Clone, Serialize)]
 pub struct RefundRequest {
     /// 微信支付订单号
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_id: Option<String>,
 
     /// 商户订单号
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub out_trade_no: Option<String>,
 
     /// 商户退款单号
     pub out_refund_no: String,
 
     /// 退款原因
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 
     /// 退款金额
     pub amount: RefundAmount,
 
     /// 退款结果通知地址
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_url: Option<String>,
 }
 
@@ -44,6 +48,132 @@ pub struct RefundAmount {
 
     /// 退款币种
     pub currency: String,
+}
+
+impl RefundRequest {
+    /// Validate required order identity and amount before a network request.
+    pub fn validate(&self) -> WxPayResult<()> {
+        let (id, field) = match (&self.transaction_id, &self.out_trade_no) {
+            (Some(id), None) => (id, "transaction_id"),
+            (None, Some(id)) => (id, "out_trade_no"),
+            _ => {
+                return Err(crate::error::WxPayError::invalid_parameter(
+                    "exactly one of transaction_id and out_trade_no is required",
+                ));
+            }
+        };
+        super::require_text(id, field)?;
+        super::require_identifier(&self.out_refund_no, "out_refund_no")?;
+        if self.amount.refund == 0
+            || self.amount.refund > self.amount.total
+            || self.amount.currency != "CNY"
+        {
+            return Err(crate::error::WxPayError::invalid_parameter(
+                "refund must be positive, not exceed total, and use CNY",
+            ));
+        }
+        if self.out_refund_no.len() > 64 || self.reason.as_ref().is_some_and(|s| s.len() > 80) {
+            return Err(crate::error::WxPayError::invalid_parameter(
+                "refund identifier or reason exceeds the documented length",
+            ));
+        }
+        if let Some(url) = &self.notify_url {
+            super::validate_notify_url(url)?;
+        }
+        Ok(())
+    }
+}
+
+/// Optional refund funding and item parameters.
+#[derive(Debug, Clone, Default)]
+pub struct RefundOptions {
+    /// AVAILABLE (legacy settlement) or UNSETTLED (eligible deposits).
+    pub funds_account: Option<String>,
+    /// Funding accounts; their sum must equal the refund amount.
+    pub from: Option<Vec<RefundFunding>>,
+    /// Items matching those supplied at payment creation.
+    pub goods_detail: Option<Vec<RefundGoodsDetail>>,
+}
+
+/// An account contributing funds to a refund.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefundFunding {
+    /// AVAILABLE or UNAVAILABLE.
+    pub account: String,
+    /// Amount in cents.
+    pub amount: u64,
+}
+
+/// Item information for a targeted goods refund.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefundGoodsDetail {
+    /// Merchant item identifier supplied at payment creation.
+    pub merchant_goods_id: String,
+    /// Optional WeChat item identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wechatpay_goods_id: Option<String>,
+    /// Optional item name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goods_name: Option<String>,
+    /// Unit price in cents.
+    pub unit_price: u64,
+    /// Refund amount for this item in cents.
+    pub refund_amount: u64,
+    /// Refunded quantity.
+    pub refund_quantity: u64,
+}
+
+impl RefundOptions {
+    fn validate(&self, refund: u64) -> WxPayResult<()> {
+        use crate::error::WxPayError;
+        if self
+            .funds_account
+            .as_deref()
+            .is_some_and(|v| !matches!(v, "AVAILABLE" | "UNSETTLED"))
+        {
+            return Err(WxPayError::invalid_parameter("unsupported funds_account"));
+        }
+        if let Some(from) = &self.from {
+            let mut accounts = std::collections::HashSet::new();
+            let mut total = 0_u64;
+            for item in from {
+                if !matches!(item.account.as_str(), "AVAILABLE" | "UNAVAILABLE")
+                    || !accounts.insert(&item.account)
+                {
+                    return Err(WxPayError::invalid_parameter(
+                        "invalid or duplicate refund funding account",
+                    ));
+                }
+                total = total.checked_add(item.amount).ok_or_else(|| {
+                    WxPayError::invalid_parameter("refund funding total overflow")
+                })?;
+            }
+            if total != refund {
+                return Err(WxPayError::invalid_parameter(
+                    "funding amounts must sum to refund",
+                ));
+            }
+        }
+        if let Some(goods) = &self.goods_detail {
+            if goods.is_empty() {
+                return Err(WxPayError::invalid_parameter(
+                    "goods_detail cannot be empty",
+                ));
+            }
+            for item in goods {
+                super::require_text(&item.merchant_goods_id, "merchant_goods_id")?;
+                if item.refund_quantity == 0
+                    || item.refund_amount == 0
+                    || item.refund_amount > refund
+                {
+                    return Err(WxPayError::invalid_parameter(
+                        "invalid goods refund quantity or amount",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 退款响应
@@ -65,6 +195,7 @@ pub struct RefundResponse {
     pub status: String,
 
     /// 退款金额
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<RefundAmount>,
 }
 
@@ -184,7 +315,29 @@ impl RefundService {
 
     /// 创建退款
     pub async fn create_refund(&self, request: &RefundRequest) -> WxPayResult<RefundResponse> {
-        let body = serde_json::to_string(request)?;
+        self.create_refund_with_options(request, &RefundOptions::default())
+            .await
+    }
+
+    /// Create a refund with optional funding and item details.
+    pub async fn create_refund_with_options(
+        &self,
+        request: &RefundRequest,
+        options: &RefundOptions,
+    ) -> WxPayResult<RefundResponse> {
+        request.validate()?;
+        options.validate(request.amount.refund)?;
+        let mut body = serde_json::to_value(request)?;
+        if let Some(account) = &options.funds_account {
+            body["funds_account"] = account.clone().into();
+        }
+        if let Some(from) = &options.from {
+            body["amount"]["from"] = serde_json::to_value(from)?;
+        }
+        if let Some(goods) = &options.goods_detail {
+            body["goods_detail"] = serde_json::to_value(goods)?;
+        }
+        let body = serde_json::to_string(&body)?;
 
         self.transport
             .request(
@@ -203,7 +356,11 @@ impl RefundService {
 
     /// 查询退款
     pub async fn query_refund(&self, out_refund_no: &str) -> WxPayResult<RefundResponse> {
-        let path = format!("/v3/refund/domestic/refunds/{}", out_refund_no);
+        super::require_identifier(out_refund_no, "out_refund_no")?;
+        let path = format!(
+            "/v3/refund/domestic/refunds/{}",
+            super::encode_component(out_refund_no)
+        );
         self.transport
             .request(HttpMethod::Get, &path, None, "refund.query_refund")
             .await

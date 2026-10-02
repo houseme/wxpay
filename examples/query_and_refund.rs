@@ -27,19 +27,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "✓ 交易状态：{}（{}），微信订单号：{}",
         tx.trade_state,
         tx.trade_state_desc.as_deref().unwrap_or(""),
-        tx.transaction_id
+        tx.transaction_id.as_deref().unwrap_or("尚未支付")
     );
 
-    // 2) 退款。仅当存在 transaction_id 时才有意义。
-    let refund_amount = 1; // 退款金额（分），演示退全款 0.01 元。
+    // 仅对已支付的查询结果退款，并以查询到的原订单金额作为 total。
+    if tx.trade_state != "SUCCESS" {
+        println!("订单尚未支付成功，跳过退款");
+        return Ok(());
+    }
+    let transaction_id = tx.transaction_id.ok_or("已支付订单缺少 transaction_id")?;
+    let total = tx.amount.ok_or("查询结果缺少原订单金额")?.total;
+    let refund_amount = 1; // 示例部分退款 0.01 元。
     let request = RefundRequest {
-        transaction_id: Some(tx.transaction_id.clone()),
-        out_trade_no: Some(out_trade_no.clone()),
+        transaction_id: Some(transaction_id),
+        out_trade_no: None,
         out_refund_no: format!("refund_{}", chrono::Utc::now().timestamp_millis()),
         reason: Some("示例退款".to_string()),
         amount: RefundAmount {
             refund: refund_amount,
-            total: refund_amount,
+            total,
             currency: "CNY".to_string(),
         },
         notify_url: Some(common::opt_env(

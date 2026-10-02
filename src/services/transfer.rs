@@ -1,6 +1,6 @@
 //! 转账服务模块
 //!
-//! 提供微信支付转账功能。
+//! 提供存量商家转账到零钱（批量转账）功能；不包含新版用户确认收款接口。
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -51,7 +51,8 @@ pub struct TransferDetail {
     /// 用户标识
     pub openid: String,
 
-    /// 用户名
+    /// Plaintext recipient name. The service encrypts this field automatically.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
 }
 
@@ -64,8 +65,164 @@ pub struct TransferResponse {
     /// 商户批次单号
     pub out_batch_no: String,
 
-    /// 批次状态
+    /// Optional status in the creation response; acceptance is not payment success.
+    pub batch_status: Option<String>,
+
+    /// Time this batch was accepted.
+    pub create_time: String,
+}
+
+/// Batch query response uses a nested transfer_batch object.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QueryTransferBatchResponse {
+    /// Current batch totals and status.
+    pub transfer_batch: TransferBatch,
+    /// Requested detail page when available.
+    #[serde(default)]
+    pub transfer_detail_list: Vec<TransferDetailResult>,
+}
+
+/// Batch summary returned by a query.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TransferBatch {
+    /// Merchant batch number.
+    pub out_batch_no: String,
+    /// WeChat batch number.
+    pub batch_id: String,
+    /// Current batch processing state.
     pub batch_status: String,
+    /// Total requested amount in cents.
+    pub total_amount: u64,
+    /// Total requested transfers.
+    pub total_num: u64,
+    /// Successful transfer amount so far, when reported.
+    pub success_amount: Option<u64>,
+    /// Successful transfer count so far, when reported.
+    pub success_num: Option<u64>,
+    /// Failed transfer amount so far, when reported.
+    pub fail_amount: Option<u64>,
+    /// Failed transfer count so far, when reported.
+    pub fail_num: Option<u64>,
+    /// Reason a batch was closed.
+    pub close_reason: Option<String>,
+}
+
+/// Compact transfer detail returned by a batch query.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TransferDetailResult {
+    /// Merchant detail number.
+    pub out_detail_no: String,
+    /// WeChat detail number.
+    pub detail_id: String,
+    /// Current detail processing state.
+    pub detail_status: String,
+}
+
+/// Optional batch query pagination. Defaults to querying only the summary.
+#[derive(Debug, Clone, Default)]
+pub struct TransferQueryOptions {
+    /// Whether to include transfer details.
+    pub need_query_detail: bool,
+    /// Starting detail offset.
+    pub offset: Option<u64>,
+    /// Page size from 20 to 100.
+    pub limit: Option<u64>,
+    /// ALL, SUCCESS, FAIL, or WAIT_PAY.
+    pub detail_status: Option<String>,
+}
+
+impl TransferQueryOptions {
+    fn query_string(&self) -> WxPayResult<String> {
+        if self.limit.is_some_and(|n| !(20..=100).contains(&n)) {
+            return Err(crate::error::WxPayError::invalid_parameter(
+                "transfer query limit must be between 20 and 100",
+            ));
+        }
+        if self
+            .detail_status
+            .as_deref()
+            .is_some_and(|s| !matches!(s, "ALL" | "SUCCESS" | "FAIL" | "WAIT_PAY"))
+        {
+            return Err(crate::error::WxPayError::invalid_parameter(
+                "unsupported transfer detail_status",
+            ));
+        }
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair(
+            "need_query_detail",
+            if self.need_query_detail {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        if let Some(offset) = self.offset {
+            query.append_pair("offset", &offset.to_string());
+        }
+        if let Some(limit) = self.limit {
+            query.append_pair("limit", &limit.to_string());
+        }
+        if let Some(status) = &self.detail_status {
+            query.append_pair("detail_status", status);
+        }
+        Ok(query.finish())
+    }
+}
+
+impl TransferRequest {
+    /// Validate batch totals and reject duplicate detail identifiers before sending.
+    pub fn validate(&self) -> WxPayResult<()> {
+        use crate::error::WxPayError;
+        for (value, field) in [
+            (&self.appid, "appid"),
+            (&self.out_batch_no, "out_batch_no"),
+            (&self.batch_name, "batch_name"),
+            (&self.batch_remark, "batch_remark"),
+        ] {
+            super::require_text(value, field)?;
+        }
+        if self.transfer_detail_list.is_empty()
+            || self.transfer_detail_list.len() > 3000
+            || self.total_num != self.transfer_detail_list.len() as u64
+        {
+            return Err(WxPayError::invalid_parameter(
+                "batch must contain 1 to 3000 details and total_num must match",
+            ));
+        }
+        let all_named = self.transfer_detail_list[0].user_name.is_some();
+        let mut total = 0_u64;
+        let mut ids = std::collections::HashSet::new();
+        for detail in &self.transfer_detail_list {
+            super::require_text(&detail.out_detail_no, "out_detail_no")?;
+            super::require_text(&detail.openid, "openid")?;
+            super::require_text(&detail.transfer_remark, "transfer_remark")?;
+            if detail.transfer_amount == 0 || !ids.insert(&detail.out_detail_no) {
+                return Err(WxPayError::invalid_parameter(
+                    "transfer amount must be positive and detail numbers unique",
+                ));
+            }
+            if detail.user_name.is_some() != all_named
+                || (detail.transfer_amount < 30 && detail.user_name.is_some())
+                || (detail.transfer_amount >= 200_000 && detail.user_name.is_none())
+            {
+                return Err(WxPayError::invalid_parameter(
+                    "recipient names must be consistent within a batch, omitted below 30 cents, and provided from 200000 cents",
+                ));
+            }
+            if let Some(name) = &detail.user_name {
+                super::require_text(name, "user_name")?;
+            }
+            total = total
+                .checked_add(detail.transfer_amount)
+                .ok_or_else(|| WxPayError::invalid_parameter("transfer total overflow"))?;
+        }
+        if total != self.total_amount {
+            return Err(WxPayError::invalid_parameter(
+                "total_amount must equal sum of detail amounts",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// 查询转账批次请求
@@ -191,14 +348,35 @@ impl TransferService {
         &self,
         request: &TransferRequest,
     ) -> WxPayResult<TransferResponse> {
-        let body = serde_json::to_string(request)?;
+        request.validate()?;
+        let mut encrypted = std::borrow::Cow::Borrowed(request);
+        let serial = if request
+            .transfer_detail_list
+            .iter()
+            .any(|d| d.user_name.is_some())
+        {
+            let mut names: Vec<_> = encrypted
+                .to_mut()
+                .transfer_detail_list
+                .iter_mut()
+                .filter_map(|d| d.user_name.as_mut())
+                .collect();
+            self.transport.encrypt_sensitive_fields(&mut names).await?
+        } else {
+            None
+        };
+        let body = serde_json::to_string(encrypted.as_ref())?;
 
         self.transport
-            .request(
+            .request_with_headers(
                 HttpMethod::Post,
                 "/v3/transfer/batches",
                 Some(&body),
                 "transfer.create_transfer",
+                serial
+                    .into_iter()
+                    .map(|serial| ("Wechatpay-Serial".into(), serial))
+                    .collect(),
             )
             .await
     }
@@ -216,9 +394,27 @@ impl TransferService {
         self.create_transfer(request).await
     }
 
-    /// 查询转账批次
-    pub async fn query_transfer_batch(&self, batch_id: &str) -> WxPayResult<TransferResponse> {
-        let path = format!("/v3/transfer/batches/{}", batch_id);
+    /// Query by WeChat batch ID, returning only the batch summary by default.
+    pub async fn query_transfer_batch(
+        &self,
+        batch_id: &str,
+    ) -> WxPayResult<QueryTransferBatchResponse> {
+        self.query_transfer_batch_with_options(batch_id, &TransferQueryOptions::default())
+            .await
+    }
+
+    /// Query by WeChat batch ID with explicit detail pagination.
+    pub async fn query_transfer_batch_with_options(
+        &self,
+        batch_id: &str,
+        options: &TransferQueryOptions,
+    ) -> WxPayResult<QueryTransferBatchResponse> {
+        super::require_identifier(batch_id, "batch_id")?;
+        let path = format!(
+            "/v3/transfer/batches/batch-id/{}?{}",
+            super::encode_component(batch_id),
+            options.query_string()?
+        );
         self.transport
             .request(
                 HttpMethod::Get,
@@ -229,28 +425,55 @@ impl TransferService {
             .await
     }
 
-    /// 查询转账批次（文档风格）
+    /// Query by merchant batch number.
     pub async fn query_batch(
         &self,
         request: &QueryTransferBatchRequest,
-    ) -> WxPayResult<TransferResponse> {
-        self.query_transfer_batch(&request.out_batch_no).await
+    ) -> WxPayResult<QueryTransferBatchResponse> {
+        self.get_transfer_batch_by_out_batch_no(&request.out_batch_no)
+            .await
     }
 
-    /// 查询转账（文档/API 表格简化命名）
+    /// Alias for querying a merchant batch number.
     pub async fn query(
         &self,
         request: &QueryTransferBatchRequest,
-    ) -> WxPayResult<TransferResponse> {
+    ) -> WxPayResult<QueryTransferBatchResponse> {
         self.query_batch(request).await
     }
 
-    /// 按商户批次单号查询转账批次（兼容 `wechatpay-go` 风格）
+    /// Query by merchant batch number, returning only the summary by default.
     pub async fn get_transfer_batch_by_out_batch_no(
         &self,
         out_batch_no: &str,
-    ) -> WxPayResult<TransferResponse> {
-        self.query_transfer_batch(out_batch_no).await
+    ) -> WxPayResult<QueryTransferBatchResponse> {
+        self.get_transfer_batch_by_out_batch_no_with_options(
+            out_batch_no,
+            &TransferQueryOptions::default(),
+        )
+        .await
+    }
+
+    /// Query by merchant batch number with explicit detail pagination.
+    pub async fn get_transfer_batch_by_out_batch_no_with_options(
+        &self,
+        out_batch_no: &str,
+        options: &TransferQueryOptions,
+    ) -> WxPayResult<QueryTransferBatchResponse> {
+        super::require_identifier(out_batch_no, "out_batch_no")?;
+        let path = format!(
+            "/v3/transfer/batches/out-batch-no/{}?{}",
+            super::encode_component(out_batch_no),
+            options.query_string()?
+        );
+        self.transport
+            .request(
+                HttpMethod::Get,
+                &path,
+                None,
+                "transfer.get_transfer_batch_by_out_batch_no",
+            )
+            .await
     }
 }
 
@@ -292,10 +515,10 @@ mod tests {
         let json = r#"{
             "batch_id": "1030000071100999991182020050700019480101",
             "out_batch_no": "batch_001",
-            "batch_status": "ACCEPT"
+            "create_time": "2026-10-02T12:00:00+08:00"
         }"#;
         let response: TransferResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(response.batch_status, "ACCEPT");
+        assert!(response.batch_status.is_none());
         assert_eq!(
             response.batch_id,
             "1030000071100999991182020050700019480101"

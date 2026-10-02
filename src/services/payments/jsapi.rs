@@ -27,12 +27,15 @@ pub struct JsapiRequest {
     pub out_trade_no: String,
 
     /// 订单金额
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
 
     /// 支付者信息
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub payer: Option<Payer>,
 
     /// 通知地址
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_url: Option<String>,
 }
 
@@ -43,6 +46,7 @@ pub struct Amount {
     pub total: u64,
 
     /// 货币类型
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
 }
 
@@ -62,22 +66,29 @@ pub struct JsapiResponse {
 
 /// JSAPI 支付参数
 ///
-/// 用于前端调用 wx.chooseWXpay 时的参数。
+/// 序列化字段适用于 WeixinJSBridge / 小程序 requestPayment；
+/// JSSDK chooseWXpay 使用 `timestamp`（小写 s），需由调用方映射。
 #[derive(Debug, Clone, Serialize)]
 pub struct JsapiPayParams {
-    /// 时间戳
+    /// AppID used for this payment.
+    #[serde(rename = "appId")]
+    pub appid: String,
+    /// Timestamp for WeixinJSBridge and mini-program requestPayment.
+    #[serde(rename = "timeStamp")]
     pub timestamp: String,
-
-    /// 随机字符串
+    /// Random nonce.
+    #[serde(rename = "nonceStr")]
     pub nonce_str: String,
-
-    /// 预支付交易会话标识
+    /// Raw prepay ID retained for Rust callers; excluded from front-end JSON.
+    #[serde(skip_serializing)]
     pub prepay_id: String,
-
-    /// 签名
+    /// Front-end package value: `prepay_id=<id>`.
+    pub package: String,
+    /// Signature algorithm.
+    #[serde(rename = "signType")]
     pub sign_type: String,
-
-    /// 签名
+    /// Merchant signature.
+    #[serde(rename = "paySign")]
     pub pay_sign: String,
 }
 
@@ -127,7 +138,7 @@ pub struct JsapiPayParams {
 ///         payer: Some(Payer {
 ///             openid: "test_openid".to_string(),
 ///         }),
-///         notify_url: None,
+///         notify_url: Some("https://example.com/notify".to_string()),
 ///     };
 ///     let response = service.create_order(&request).await?;
 ///     let _ = response;
@@ -212,7 +223,30 @@ impl JsapiService {
     ///
     /// 返回 JSAPI 响应
     pub async fn create_order(&self, request: &JsapiRequest) -> WxPayResult<JsapiResponse> {
-        let body = serde_json::to_string(request)?;
+        self.create_order_with_options(request, &super::PaymentOptions::default())
+            .await
+    }
+
+    /// Create an order with optional expiry, merchant data and settlement fields.
+    pub async fn create_order_with_options(
+        &self,
+        request: &JsapiRequest,
+        options: &super::PaymentOptions,
+    ) -> WxPayResult<JsapiResponse> {
+        super::validate_order(
+            &request.appid,
+            &request.mchid,
+            &request.description,
+            &request.out_trade_no,
+            request.amount.as_ref(),
+            request.notify_url.as_deref(),
+        )?;
+        let payer = request
+            .payer
+            .as_ref()
+            .ok_or_else(|| crate::error::WxPayError::invalid_parameter("payer is required"))?;
+        crate::services::require_text(&payer.openid, "payer.openid")?;
+        let body = super::payment_body(request, options)?;
 
         self.transport
             .request(
@@ -244,16 +278,33 @@ impl JsapiService {
     ///
     /// 返回 JSAPI 支付参数
     pub async fn generate_pay_params(&self, prepay_id: &str) -> WxPayResult<JsapiPayParams> {
+        self.generate_pay_params_for_app(&self.config.app_id, prepay_id)
+            .await
+    }
+
+    /// Generate parameters for the same AppID that was used to create the order.
+    pub async fn generate_pay_params_for_app(
+        &self,
+        appid: &str,
+        prepay_id: &str,
+    ) -> WxPayResult<JsapiPayParams> {
+        crate::services::require_text(appid, "appid")?;
+        crate::services::require_text(prepay_id, "prepay_id")?;
         let timestamp = crate::utils::timestamp::get_timestamp();
         let nonce = crate::utils::nonce::generate_nonce();
 
         // 构建签名消息
-        let message = format!("{}\n{}\nprepay_id={}\n", timestamp, nonce, prepay_id);
+        let message = format!(
+            "{}\n{}\n{}\nprepay_id={}\n",
+            appid, timestamp, nonce, prepay_id
+        );
 
         // 生成签名
         let signature = self.signer.sign(&message).await?;
 
         Ok(JsapiPayParams {
+            appid: appid.to_string(),
+            package: format!("prepay_id={prepay_id}"),
             timestamp: timestamp.to_string(),
             nonce_str: nonce,
             prepay_id: prepay_id.to_string(),

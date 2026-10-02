@@ -28,12 +28,15 @@ pub struct H5Request {
     pub out_trade_no: String,
 
     /// 订单金额
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
 
     /// 通知地址
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_url: Option<String>,
 
     /// 场景信息
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scene_info: Option<SceneInfo>,
 }
 
@@ -41,12 +44,15 @@ pub struct H5Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneInfo {
     /// 用户终端 IP
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub payer_client_ip: Option<String>,
 
     /// 商户端设备号
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
 
     /// H5 场景信息
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub h5_info: Option<H5Info>,
 }
 
@@ -107,7 +113,7 @@ pub struct H5Response {
 ///             total: 100,
 ///             currency: Some("CNY".to_string()),
 ///         }),
-///         notify_url: None,
+///         notify_url: Some("https://example.com/notify".to_string()),
 ///         scene_info: None,
 ///     };
 ///     let response = service.create_order(&request).await?;
@@ -175,7 +181,38 @@ impl H5Service {
 
     /// 创建 H5 订单
     pub async fn create_order(&self, request: &H5Request) -> WxPayResult<H5Response> {
-        let body = serde_json::to_string(request)?;
+        self.create_order_with_options(request, &super::PaymentOptions::default())
+            .await
+    }
+
+    /// Create an order with optional expiry, merchant data and settlement fields.
+    pub async fn create_order_with_options(
+        &self,
+        request: &H5Request,
+        options: &super::PaymentOptions,
+    ) -> WxPayResult<H5Response> {
+        super::validate_order(
+            &request.appid,
+            &request.mchid,
+            &request.description,
+            &request.out_trade_no,
+            request.amount.as_ref(),
+            request.notify_url.as_deref(),
+        )?;
+        let scene = request.scene_info.as_ref().ok_or_else(|| {
+            crate::error::WxPayError::invalid_parameter("scene_info is required for H5")
+        })?;
+        let ip = scene.payer_client_ip.as_deref().ok_or_else(|| {
+            crate::error::WxPayError::invalid_parameter("scene_info.payer_client_ip is required")
+        })?;
+        ip.parse::<std::net::IpAddr>().map_err(|_| {
+            crate::error::WxPayError::invalid_parameter("payer_client_ip must be IPv4 or IPv6")
+        })?;
+        let h5 = scene.h5_info.as_ref().ok_or_else(|| {
+            crate::error::WxPayError::invalid_parameter("scene_info.h5_info is required")
+        })?;
+        crate::services::require_text(&h5.r#type, "h5_info.type")?;
+        let body = super::payment_body(request, options)?;
 
         self.transport
             .request(

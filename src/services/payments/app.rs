@@ -28,9 +28,11 @@ pub struct AppRequest {
     pub out_trade_no: String,
 
     /// 订单金额
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
 
     /// 通知地址
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_url: Option<String>,
 }
 
@@ -111,7 +113,7 @@ pub struct AppPayParams {
 ///             total: 100,
 ///             currency: Some("CNY".to_string()),
 ///         }),
-///         notify_url: None,
+///         notify_url: Some("https://example.com/notify".to_string()),
 ///     };
 ///     let response = service.create_order(&request).await?;
 ///     let _ = response;
@@ -178,7 +180,25 @@ impl AppService {
 
     /// 创建 APP 订单
     pub async fn create_order(&self, request: &AppRequest) -> WxPayResult<AppResponse> {
-        let body = serde_json::to_string(request)?;
+        self.create_order_with_options(request, &super::PaymentOptions::default())
+            .await
+    }
+
+    /// Create an order with optional expiry, merchant data and settlement fields.
+    pub async fn create_order_with_options(
+        &self,
+        request: &AppRequest,
+        options: &super::PaymentOptions,
+    ) -> WxPayResult<AppResponse> {
+        super::validate_order(
+            &request.appid,
+            &request.mchid,
+            &request.description,
+            &request.out_trade_no,
+            request.amount.as_ref(),
+            request.notify_url.as_deref(),
+        )?;
+        let body = super::payment_body(request, options)?;
 
         self.transport
             .request(
@@ -205,17 +225,29 @@ impl AppService {
     ///
     /// 返回 APP 支付参数
     pub async fn generate_pay_params(&self, prepay_id: &str) -> WxPayResult<AppPayParams> {
+        self.generate_pay_params_for_app(&self.config.app_id, prepay_id)
+            .await
+    }
+
+    /// Generate parameters for the same AppID that was used to create the order.
+    pub async fn generate_pay_params_for_app(
+        &self,
+        appid: &str,
+        prepay_id: &str,
+    ) -> WxPayResult<AppPayParams> {
+        crate::services::require_text(appid, "appid")?;
+        crate::services::require_text(prepay_id, "prepay_id")?;
         let timestamp = crate::utils::timestamp::get_timestamp();
         let nonce = crate::utils::nonce::generate_nonce();
 
         // 构建签名消息
-        let message = format!("{}\n{}\nprepay_id={}\n", timestamp, nonce, prepay_id);
+        let message = format!("{}\n{}\n{}\n{}\n", appid, timestamp, nonce, prepay_id);
 
         // 生成签名
         let signature = self.signer.sign(&message).await?;
 
         Ok(AppPayParams {
-            appid: self.config.app_id.clone(),
+            appid: appid.to_string(),
             partnerid: self.config.merchant_id.clone(),
             prepayid: prepay_id.to_string(),
             package: "Sign=WXPay".to_string(),

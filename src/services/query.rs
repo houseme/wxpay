@@ -66,7 +66,7 @@ pub struct Transaction {
     /// 商户订单号
     pub out_trade_no: Option<String>,
     /// 微信支付订单号
-    pub transaction_id: String,
+    pub transaction_id: Option<String>,
     /// 交易状态
     pub trade_state: String,
     /// 交易类型
@@ -173,9 +173,12 @@ impl QueryService {
         &self,
         request: &QueryByTransactionIdRequest,
     ) -> WxPayResult<Transaction> {
+        super::require_identifier(&request.transaction_id, "transaction_id")?;
+        super::require_text(&request.mchid, "mchid")?;
         let path = format!(
             "/v3/pay/transactions/id/{}?mchid={}",
-            request.transaction_id, request.mchid
+            super::encode_component(&request.transaction_id),
+            super::encode_component(&request.mchid)
         );
 
         self.transport
@@ -212,9 +215,12 @@ impl QueryService {
         &self,
         request: &QueryByOutTradeNoRequest,
     ) -> WxPayResult<Transaction> {
+        super::require_identifier(&request.out_trade_no, "out_trade_no")?;
+        super::require_text(&request.mchid, "mchid")?;
         let path = format!(
             "/v3/pay/transactions/out-trade-no/{}?mchid={}",
-            request.out_trade_no, request.mchid
+            super::encode_component(&request.out_trade_no),
+            super::encode_component(&request.mchid)
         );
 
         self.transport
@@ -231,7 +237,7 @@ impl QueryService {
             .clone()
             .unwrap_or_else(|| self.config.merchant_id.clone());
         match (transaction_id, out_trade_no) {
-            (Some(transaction_id), _) => {
+            (Some(transaction_id), None) => {
                 let request = QueryByTransactionIdRequest {
                     transaction_id: transaction_id.to_string(),
                     mchid,
@@ -265,7 +271,12 @@ impl QueryService {
         out_trade_no: &str,
         request: &CloseOrderRequest,
     ) -> WxPayResult<CloseOrderResponse> {
-        let path = format!("/v3/pay/transactions/out-trade-no/{}/close", out_trade_no);
+        super::require_identifier(out_trade_no, "out_trade_no")?;
+        super::require_text(&request.mchid, "mchid")?;
+        let path = format!(
+            "/v3/pay/transactions/out-trade-no/{}/close",
+            super::encode_component(out_trade_no)
+        );
         let body = serde_json::to_string(request)?;
 
         self.transport

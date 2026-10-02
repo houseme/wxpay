@@ -28,9 +28,11 @@ pub struct NativeRequest {
     pub out_trade_no: String,
 
     /// 订单金额
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
 
     /// 通知地址
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_url: Option<String>,
 }
 
@@ -84,7 +86,7 @@ pub struct NativeResponse {
 ///             total: 100,
 ///             currency: Some("CNY".to_string()),
 ///         }),
-///         notify_url: None,
+///         notify_url: Some("https://example.com/notify".to_string()),
 ///     };
 ///     let response = service.create_order(&request).await?;
 ///     let _ = response;
@@ -151,7 +153,25 @@ impl NativeService {
 
     /// 创建 Native 订单
     pub async fn create_order(&self, request: &NativeRequest) -> WxPayResult<NativeResponse> {
-        let body = serde_json::to_string(request)?;
+        self.create_order_with_options(request, &super::PaymentOptions::default())
+            .await
+    }
+
+    /// Create an order with optional expiry, merchant data and settlement fields.
+    pub async fn create_order_with_options(
+        &self,
+        request: &NativeRequest,
+        options: &super::PaymentOptions,
+    ) -> WxPayResult<NativeResponse> {
+        super::validate_order(
+            &request.appid,
+            &request.mchid,
+            &request.description,
+            &request.out_trade_no,
+            request.amount.as_ref(),
+            request.notify_url.as_deref(),
+        )?;
+        let body = super::payment_body(request, options)?;
 
         self.transport
             .request(

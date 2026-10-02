@@ -43,7 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resp = client.transfer().create_transfer(&transfer).await?;
     println!(
         "✓ 转账已受理：batch_id={}, status={}",
-        resp.batch_id, resp.batch_status
+        resp.batch_id,
+        resp.batch_status
+            .as_deref()
+            .unwrap_or("受理成功，需查单确认")
     );
 
     // 2) 分账（基于一笔已成功的交易）。此处 transaction_id 仅为演示占位。
@@ -51,8 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         transaction_id: common::opt_env("WXPAY_TRANSACTION_ID", "4200000000000000000"),
         out_order_no: format!("ps_{ts}"),
         receivers: vec![Receiver {
-            receiver_type: "MERCHANT_ID".to_string(),
-            account: client.config().merchant_id.clone(),
+            receiver_type: "PERSONAL_OPENID".to_string(),
+            account: payee_openid,
             amount: 10, // 分账金额（分）
             description: "示例分账".to_string(),
             name: None,
@@ -64,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ps = client.profit_sharing().create_order(&profit).await?;
     println!(
         "✓ 分账已受理：order_id={}, status={}",
-        ps.order_id, ps.status
+        ps.order_id, ps.state
     );
     Ok(())
 }

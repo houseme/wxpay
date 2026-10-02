@@ -23,7 +23,8 @@ pub struct ProfitSharingRequest {
     /// 分账接收方列表
     pub receivers: Vec<Receiver>,
 
-    /// 分账说明
+    /// Legacy description retained for source compatibility; API uses each receiver description.
+    #[serde(skip_serializing)]
     pub description: String,
 }
 
@@ -53,7 +54,8 @@ pub struct Receiver {
     /// 分账描述
     pub description: String,
 
-    /// 接收方名称
+    /// Plaintext name; encrypted by the service using the selected platform key.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
@@ -78,7 +80,7 @@ pub struct AddProfitSharingReceiverRequest {
     /// 接收方账号
     pub account: String,
 
-    /// 接收方名称（个人收款方时必填）
+    /// Plaintext merchant full name (required for MERCHANT_ID), optional for PERSONAL_OPENID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -125,8 +127,46 @@ pub struct ProfitSharingResponse {
     /// 微信支付订单号
     pub transaction_id: String,
 
-    /// 分账单状态
-    pub status: String,
+    /// 分账单状态（FINISHED 只表示处理完毕，需检查每个接收方的 result）。
+    pub state: String,
+
+    /// 每个接收方的分账结果。
+    pub receivers: Vec<ProfitSharingReceiverResult>,
+}
+
+/// Individual outcome; a FINISHED order can contain CLOSED receivers.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfitSharingReceiverResult {
+    /// Receiver type.
+    #[serde(rename = "type")]
+    pub receiver_type: String,
+    /// Receiver account.
+    pub account: String,
+    /// Amount in cents.
+    pub amount: u64,
+    /// Description supplied when creating the order.
+    pub description: String,
+    /// PENDING, SUCCESS or CLOSED.
+    pub result: String,
+    /// Failure reason for CLOSED receivers.
+    pub fail_reason: Option<String>,
+    /// Time the individual transfer was created.
+    pub create_time: Option<String>,
+    /// Completion time if available.
+    pub finish_time: Option<String>,
+    /// WeChat transfer detail identifier.
+    pub detail_id: Option<String>,
+}
+
+/// Options for creating an ordinary-merchant profit-sharing order.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProfitSharingOptions {
+    /// AppID for PERSONAL_OPENID receivers; defaults to the client configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appid: Option<String>,
+    /// Release the remaining funds and prohibit subsequent splits when true.
+    /// Defaults to false so calling create does not implicitly finish an order.
+    pub unfreeze_unsplit: bool,
 }
 
 /// 分账接收方响应（添加/删除）
@@ -184,8 +224,11 @@ pub struct ProfitSharingFinishResponse {
     /// 微信支付订单号
     pub transaction_id: String,
 
-    /// 分账单状态
-    pub status: String,
+    /// 分账单状态（FINISHED 只表示处理完毕，需检查每个接收方的 result）。
+    pub state: String,
+
+    /// 每个接收方的分账结果。
+    pub receivers: Vec<ProfitSharingReceiverResult>,
 }
 
 /// 分账服务
@@ -225,7 +268,7 @@ pub struct ProfitSharingFinishResponse {
 ///         transaction_id: "1217752501201407033233368018".to_string(),
 ///         out_order_no: "P20150806125346".to_string(),
 ///         receivers: vec![wxpay_rs::services::Receiver {
-///             receiver_type: "MERCHANT_ID".to_string(),
+///             receiver_type: "PERSONAL_OPENID".to_string(),
 ///             account: "1900000109".to_string(),
 ///             amount: 100,
 ///             description: "分账".to_string(),
@@ -301,14 +344,73 @@ impl ProfitSharingService {
         &self,
         request: &ProfitSharingRequest,
     ) -> WxPayResult<ProfitSharingResponse> {
-        let body = serde_json::to_string(request)?;
+        self.create_profit_sharing_with_options(request, &ProfitSharingOptions::default())
+            .await
+    }
 
+    /// Create a split with explicit AppID and remaining-funds behavior.
+    /// Receiver names must be plaintext; this method encrypts them once per request.
+    pub async fn create_profit_sharing_with_options(
+        &self,
+        request: &ProfitSharingRequest,
+        options: &ProfitSharingOptions,
+    ) -> WxPayResult<ProfitSharingResponse> {
+        super::require_identifier(&request.transaction_id, "transaction_id")?;
+        super::require_identifier(&request.out_order_no, "out_order_no")?;
+        if request.receivers.is_empty() || request.receivers.len() > 50 {
+            return Err(crate::error::WxPayError::invalid_parameter(
+                "profit sharing requires 1 to 50 receivers",
+            ));
+        }
+        for receiver in &request.receivers {
+            validate_receiver(
+                &receiver.receiver_type,
+                &receiver.account,
+                receiver.name.as_deref(),
+            )?;
+            super::require_text(&receiver.description, "receiver.description")?;
+            if receiver.amount == 0 || receiver.description.len() > 80 {
+                return Err(crate::error::WxPayError::invalid_parameter(
+                    "receiver amount must be positive and description at most 80 bytes",
+                ));
+            }
+        }
+        let appid = options.appid.as_deref().unwrap_or(&self.config.app_id);
+        super::require_text(appid, "appid")?;
+        let mut encrypted = std::borrow::Cow::Borrowed(request);
+        let serial = if request.receivers.iter().any(|r| r.name.is_some()) {
+            let mut names: Vec<_> = encrypted
+                .to_mut()
+                .receivers
+                .iter_mut()
+                .filter_map(|r| r.name.as_mut())
+                .collect();
+            self.transport.encrypt_sensitive_fields(&mut names).await?
+        } else {
+            None
+        };
+        #[derive(Serialize)]
+        struct Body<'a> {
+            #[serde(flatten)]
+            request: &'a ProfitSharingRequest,
+            appid: &'a str,
+            unfreeze_unsplit: bool,
+        }
+        let body = serde_json::to_string(&Body {
+            request: encrypted.as_ref(),
+            appid,
+            unfreeze_unsplit: options.unfreeze_unsplit,
+        })?;
         self.transport
-            .request(
+            .request_with_headers(
                 HttpMethod::Post,
                 "/v3/profitsharing/orders",
                 Some(&body),
                 "profit_sharing.create_profit_sharing",
+                serial
+                    .into_iter()
+                    .map(|serial| ("Wechatpay-Serial".into(), serial))
+                    .collect(),
             )
             .await
     }
@@ -334,14 +436,33 @@ impl ProfitSharingService {
         &self,
         request: &AddProfitSharingReceiverRequest,
     ) -> WxPayResult<ProfitSharingReceiverResponse> {
-        let body = serde_json::to_string(request)?;
-
+        super::require_text(&request.appid, "appid")?;
+        validate_receiver(
+            &request.receiver_type,
+            &request.account,
+            request.name.as_deref(),
+        )?;
+        super::require_text(&request.relation_type, "relation_type")?;
+        if request.relation_type == "CUSTOM" {
+            super::require_text(
+                request.custom_relation.as_deref().unwrap_or(""),
+                "custom_relation",
+            )?;
+        }
+        let mut encrypted = request.clone();
+        let mut names: Vec<_> = encrypted.name.iter_mut().collect();
+        let serial = self.transport.encrypt_sensitive_fields(&mut names).await?;
+        let body = serde_json::to_string(&encrypted)?;
         self.transport
-            .request(
+            .request_with_headers(
                 HttpMethod::Post,
                 "/v3/profitsharing/receivers/add",
                 Some(&body),
                 "profit_sharing.add_receiver",
+                serial
+                    .into_iter()
+                    .map(|serial| ("Wechatpay-Serial".into(), serial))
+                    .collect(),
             )
             .await
     }
@@ -351,6 +472,9 @@ impl ProfitSharingService {
         &self,
         request: &DeleteProfitSharingReceiverRequest,
     ) -> WxPayResult<ProfitSharingReceiverResponse> {
+        super::require_text(&request.appid, "appid")?;
+        super::require_text(&request.account, "account")?;
+        super::require_text(&request.receiver_type, "type")?;
         let body = serde_json::to_string(request)?;
 
         self.transport
@@ -369,9 +493,12 @@ impl ProfitSharingService {
         transaction_id: &str,
         out_order_no: &str,
     ) -> WxPayResult<ProfitSharingResponse> {
+        super::require_identifier(transaction_id, "transaction_id")?;
+        super::require_identifier(out_order_no, "out_order_no")?;
         let path = format!(
             "/v3/profitsharing/orders/{}?transaction_id={}",
-            out_order_no, transaction_id
+            super::encode_component(out_order_no),
+            super::encode_component(transaction_id)
         );
 
         self.transport
@@ -407,12 +534,15 @@ impl ProfitSharingService {
         &self,
         request: &ProfitSharingFinishRequest,
     ) -> WxPayResult<ProfitSharingFinishResponse> {
+        super::require_identifier(&request.transaction_id, "transaction_id")?;
+        super::require_identifier(&request.out_order_no, "out_order_no")?;
+        super::require_text(&request.description, "description")?;
         let body = serde_json::to_string(request)?;
 
         self.transport
             .request(
                 HttpMethod::Post,
-                "/v3/profitsharing/finish",
+                "/v3/profitsharing/orders/unfreeze",
                 Some(&body),
                 "profit_sharing.finish_profit_sharing",
             )
@@ -434,6 +564,24 @@ impl ProfitSharingService {
     ) -> WxPayResult<ProfitSharingFinishResponse> {
         self.finish_profit_sharing(request).await
     }
+}
+
+fn validate_receiver(receiver_type: &str, account: &str, name: Option<&str>) -> WxPayResult<()> {
+    super::require_text(account, "receiver.account")?;
+    if !matches!(receiver_type, "MERCHANT_ID" | "PERSONAL_OPENID") {
+        return Err(crate::error::WxPayError::invalid_parameter(
+            "unsupported profit sharing receiver type",
+        ));
+    }
+    if receiver_type == "MERCHANT_ID" && name.is_none() {
+        return Err(crate::error::WxPayError::invalid_parameter(
+            "MERCHANT_ID receiver requires its plaintext name",
+        ));
+    }
+    if let Some(name) = name {
+        super::require_text(name, "receiver.name")?;
+    }
+    Ok(())
 }
 
 impl std::fmt::Debug for ProfitSharingService {
@@ -472,10 +620,11 @@ mod tests {
             "order_id": "6110000071100999991182020050700019480101",
             "out_order_no": "P20150806125346",
             "transaction_id": "1217752501201407033233368018",
-            "status": "FINISHED"
+            "state": "FINISHED",
+            "receivers": []
         }"#;
         let response: ProfitSharingResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(response.status, "FINISHED");
+        assert_eq!(response.state, "FINISHED");
         assert_eq!(
             response.order_id,
             "6110000071100999991182020050700019480101"

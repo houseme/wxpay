@@ -22,7 +22,9 @@ use crate::services::profit_sharing::{
 };
 use crate::services::query::{QueryService, Transaction};
 use crate::services::refund::{RefundResponse, RefundService};
-use crate::services::transfer::{TransferRequest, TransferResponse, TransferService};
+use crate::services::transfer::{
+    QueryTransferBatchResponse, TransferRequest, TransferResponse, TransferService,
+};
 use crate::services::transport::{ServiceTransport, TransportObserver};
 
 /// 微信支付客户端
@@ -340,7 +342,7 @@ impl WxPayClient {
     pub async fn get_transfer_batch_by_out_batch_no(
         &self,
         out_batch_no: &str,
-    ) -> WxPayResult<TransferResponse> {
+    ) -> WxPayResult<QueryTransferBatchResponse> {
         self.transferbatch()
             .get_transfer_batch_by_out_batch_no(out_batch_no)
             .await
