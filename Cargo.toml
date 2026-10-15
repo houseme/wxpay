@@ -24,6 +24,8 @@ async-trait = "0.1"
 
 # HTTP 客户端
 reqwest = { version = "0.13.5", default-features = false, features = ["charset", "http2", "system-proxy", "json", "hickory-dns"] }
+# 将安全版本下限传递给下游，避免其锁文件保留命中 RUSTSEC-2026-0346 至 0349 的版本。
+rustls = { version = "0.23.46", default-features = false, optional = true }
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
@@ -40,13 +42,13 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # UUID 生成
-uuid = { version = "1.26", features = ["v4"] }
+uuid = { version = "1.28", features = ["v4"] }
 
 # URL 解析
 url = "2.5"
 
 # 加密库
-aws-lc-rs = "1.18.1"
+aws-lc-rs = "1.18.2"
 sha2 = "0.11"
 aes-gcm = "0.11.1"
 base64 = "0.23"
@@ -72,7 +74,7 @@ harness = false
 
 [features]
 default = ["tls-rustls"]
-tls-rustls = ["reqwest/rustls"]
+tls-rustls = ["reqwest/rustls", "dep:rustls"]
 full = ["tls-rustls"]
 docs = []
 

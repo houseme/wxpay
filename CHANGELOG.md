@@ -7,6 +7,18 @@ and compatibility changes are documented explicitly for each release.
 
 ## [Unreleased]
 
+### 安全
+
+- `tls-rustls` 要求 `rustls >=0.23.46, <0.24`，使下游依赖解析也排除
+  RUSTSEC-2026-0346、RUSTSEC-2026-0347、RUSTSEC-2026-0348 和 RUSTSEC-2026-0349
+  的受影响版本（[#35](https://github.com/houseme/wxpay/issues/35)、
+  [#36](https://github.com/houseme/wxpay/issues/36)、
+  [#37](https://github.com/houseme/wxpay/issues/37)、
+  [#38](https://github.com/houseme/wxpay/issues/38)）；锁文件使用修复版本。
+  禁用默认 feature 时不引入该 TLS 依赖。
+- 依赖和审计工作流变更在 PR、主线推送时执行 `cargo audit`，并支持手动运行；
+  保留每日定时检查和新漏洞 issue 报告。
+
 ## [2.1.0] - 2026-10-02
 
 本版本修复支付协议及安全边界，并包含相对于 `2.0.x` 的源码和行为不兼容变化。
