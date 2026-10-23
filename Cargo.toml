@@ -19,7 +19,7 @@ crate-type = ["lib"]
 
 [dependencies]
 # 异步运行时
-tokio = { version = "1.54", default-features = false, features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tokio = { version = "1.54.1", default-features = false, features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
 async-trait = "0.1"
 
 # HTTP 客户端
@@ -42,7 +42,7 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # UUID 生成
-uuid = { version = "1.28", features = ["v4"] }
+uuid = { version = "1.29", features = ["v4"] }
 
 # URL 解析
 url = "2.5"
